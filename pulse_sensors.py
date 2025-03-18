@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from enum import IntEnum
 import json
 import requests
 
@@ -10,6 +11,100 @@ PULSE_API_BASE = "https://api.pulsegrow.com"
 API_TIMEOUT = 20
 SENSOR_UPDATE_INTERVAL = 600.0  # 10 minutes
 SENSOR_DISCOVERY_INTERVAL = 43200.0  # 12 hours
+
+
+class DeviceType(IntEnum):
+    """Pulse device types as defined in the Pulse API spec."""
+    PULSE_ONE = 0  # Original Pulse One device
+    PULSE_PRO = 1  # Pulse Pro device
+    HUB = 2  # Pulse Hub device
+    SENSOR = 3  # Standalone sensor (e.g., VWC, pH, EC, etc.)
+    CONTROL = 4  # Some control device (unclear what this is)
+    PULSE_ZERO = 5  # Possibly an older or experimental device?
+    UNKNOWN = -1  # Fallback for unknown device types
+
+    @classmethod
+    def _missing_(cls, value):
+        """Handles unknown values by returning the UNKNOWN enum member."""
+        return cls.UNKNOWN
+
+
+class SensorType(IntEnum):
+    """Sensor types as defined in the Pulse API spec.
+
+    Some of these are guesses based on the device type. Specifically,
+    the multiple VWC sensors. I only have the Acclima, so I can't verify
+    the types for the Growlink from Pulse, the Growlink from Terralink
+    using a retrofit kit, and the TEROS 12.
+
+    There are also two different PAR sensors offered for the Pulse Hub,
+    but only one PAR sensor type. I will try to get a comprehensive
+    list from Pulse Grow. If you have a different PAR or VWC sensor,
+    please create an issue or PR on the GitHub repo, and I'll try to
+    support it.
+    """
+    HUB = 0  # Hub device
+    VWC1 = 1  # Acclima TDR 310W - Soil Moisture Sensor
+    THV1 = 2  # Temperature, Humidity, VPD Sensor
+    PH10 = 3  # pH Sensor
+    EC1 = 4   # Electrical Conductivity Sensor
+    VWC12 = 5  # TEROS12 Retrofit Kit - Soil Moisture Sensor
+    PAR1 = 8  # PAR (Light) Sensor
+    VWC2 = 9  # Terralink (Pulse-vendored) - Soil Moisture Sensor
+    ORP1 = 10  # ORP (Redox Potential) Sensor
+    THC1 = 11  # CO₂, Temperature, Humidity, Lux Sensor (CO2-1)
+    TDO1 = 12  # Dissolved Oxygen (DO) Sensor
+    VWC3 = 13  # Possibly Terralink (Growlink-vendored/retrofit) - Soil Moisture Sensor
+    UNKNOWN = -1  # Default fallback for unknown values
+
+    @classmethod
+    def _missing_(cls, value):
+        """Handles unknown values by returning the UNKNOWN enum member."""
+        return cls.UNKNOWN
+
+
+class SensorReadingType(IntEnum):
+    """Sensor reading types as defined in the Pulse API spec."""
+    # Acclima (VWC1)
+    VWC1_RH = 0  # VWC1 - Relative Humidity Reading
+    VWC1_TEMPERATURE = 1  # VWC1 - Temperature Reading
+    VWC1_CONDUCTIVITY = 2  # VWC1 - Conductivity Reading
+    VWC1_CONDUCTIVITY_PWE = 3  # VWC1 - Pore Water EC Reading
+
+    # Growlink Terralink (VWC2)
+    VWC2_RH = 4  # VWC2 - Relative Humidity Reading
+    VWC2_TEMPERATURE = 5  # VWC2 - Temperature Reading
+    VWC2_CONDUCTIVITY = 6  # VWC2 - Conductivity Reading
+    VWC2_CONDUCTIVITY_PWE = 7  # VWC2 - Pore Water EC Reading
+
+    # TEROS 12 (VWC12)
+    VWC12_RH = 8  # VWC12 - Relative Humidity Reading
+    VWC12_TEMPERATURE = 9  # VWC12 - Temperature Reading
+    VWC12_CONDUCTIVITY = 10  # VWC12 - Conductivity Reading
+    VWC12_CONDUCTIVITY_PWE = 11  # VWC12 - Pore Water EC Reading
+
+    # General Readings
+    PH = 12  # pH Reading
+    WATER_TEMPERATURE = 13  # Water Temperature Reading
+    VPD = 14  # Vapor Pressure Deficit Reading
+    DEW_POINT = 15  # Dew Point Reading
+    AIR_TEMPERATURE = 16  # Air Temperature Reading
+    ORP = 17  # Oxidation-Reduction Potential (ORP) Reading
+    CO2 = 18  # Carbon Dioxide (CO₂) Reading
+    DLI = 19  # Daily Light Integral (DLI) Reading
+    PPFD = 20  # Photosynthetic Photon Flux Density (PPFD) Reading
+    EC = 21  # Electrical Conductivity (EC) Reading
+    THC1_LIGHT = 22  # Light Intensity Reading from THC1
+    RH = 23  # Relative Humidity Reading
+    ORIGINAL_DEVICES_LIGHT = 24  # Light Reading from Original Devices
+    DO = 25  # Dissolved Oxygen (DO) Reading
+
+    UNKNOWN = -1  # Default fallback for unknown values
+
+    @classmethod
+    def _missing_(cls, value):
+        """Handles unknown values by returning the UNKNOWN enum member."""
+        return cls.UNKNOWN
 
 
 class PulseSensors(hass.Hass):
