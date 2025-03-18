@@ -149,6 +149,12 @@ class PulseSensors(hass.Hass):
                     "name": sensor_name,
                     "hub_id": hub_id,
                     "hub_name": hub_name,
+                    "sensor_type": sensor.get("sensorType"),
+                    "par_sensor_subtype": sensor.get("parSensorSubtype"),
+                    "device_type": sensor.get("deviceType"),
+                    "display_order": sensor.get("displayOrder"),
+                    "grow_id": sensor.get("growId"),
+                    "hidden": sensor.get("hidden", False),
                 }
 
         self.set_state("sensor.pulse_discovered_hubs", state=json.dumps(discovered_hubs))
