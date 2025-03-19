@@ -111,7 +111,7 @@ class PulseSensors(hass.Hass):
     def initialize(self):
         """Initialize periodic updates and set up API session."""
         self.logger = self.get_user_log("pulse_sensors")
-        self.logger.info("📜 Logging initialized for PulseSensors.")
+        self.logger.info("📝 Logging initialized for PulseSensors.")
 
         self.api_key = self.get_state(PULSE_API_KEY_ENTITY)
         if not self.api_key:
@@ -133,11 +133,13 @@ class PulseSensors(hass.Hass):
         ))
 
         # Register scheduled jobs
-        self.sensor_update_job_uuid = self.run_every(self.update_sensors, "now", update_interval)
-        self.logger.info(f"⏱️ Registered sensor update job: {self.sensor_update_job_uuid} ({update_interval} sec)")
-        self.sensor_discover_job_uuid = self.run_every(self.discover_sensors, "now", discover_interval)
+        self.sensor_update_job_uuid = self.run_every(self.update_sensor_states, "now", update_interval)
         self.logger.info(
-            f"⏱️ Registered sensor discovery job: {self.sensor_discover_job_uuid} ({discover_interval} sec)"
+            f"⏱️ Registered sensor state update job: {self.sensor_update_job_uuid} ({update_interval} sec)"
+        )
+        self.sensor_discover_job_uuid = self.run_every(self.discover_hub_sensors, "now", discover_interval)
+        self.logger.info(
+            f"⏱️ Registered hub sensor discovery job: {self.sensor_discover_job_uuid} ({discover_interval} sec)"
         )
 
         # Listen for changes to update intervals (from the UI or wherever)
@@ -150,13 +152,13 @@ class PulseSensors(hass.Hass):
 
         if entity == "input_number.pulse_update_interval":
             self.cancel_timer(self.sensor_update_job_uuid)
-            self.sensor_update_job_uuid = self.run_every(self.update_sensors, "now", new_interval)
-            self.logger.info(f"⏱️ Updated sensor update interval to {new_interval} sec")
+            self.sensor_update_job_uuid = self.run_every(self.update_sensor_states, "now", new_interval)
+            self.logger.info(f"📝️ Updated sensor state update interval to {new_interval} sec")
 
         elif entity == "input_number.pulse_discover_interval":
             self.cancel_timer(self.sensor_discover_job_uuid)
-            self.sensor_discover_job_uuid = self.run_every(self.discover_sensors, "now", new_interval)
-            self.logger.info(f"⏱️ Updated sensor discovery interval to {new_interval} sec")
+            self.sensor_discover_job_uuid = self.run_every(self.discover_hub_sensors, "now", new_interval)
+            self.logger.info(f"📝️ Updated hub sensor discovery interval to {new_interval} sec")
 
     def terminate(self):
         """Close the session when the AppDaemon context is terminated."""
@@ -167,8 +169,7 @@ class PulseSensors(hass.Hass):
         self.logger.info("🛑 Pulse Sensor app terminated.")
 
     def make_request(self, endpoint, method="GET", **kwargs):
-        """
-        Unified method to make an API request to the Pulse API.
+        """Unified method to make an API request to the Pulse API.
 
         This is mostly just exposing request.Session().request() for convenience.
 
@@ -210,16 +211,23 @@ class PulseSensors(hass.Hass):
         self.logger.info(f"📡 Fetching hub details for {hub_id} at: {url}")
         return self.make_request(url)
 
-    def get_sensor_data(self, sensor_id, last_update):
-        """Fetch latest sensor data since last recorded timestamp."""
-        start_time = last_update.strftime("%Y-%m-%dT%H:%M:%SZ")
-        url = f"/sensors/{sensor_id}/data-range?start={start_time}"
-        self.logger.info(f"📡 Fetching sensor data from {start_time} to now: {url}")
+    def get_sensor_data_range(self, sensor_id, start, end):
+        """Fetch a range of sensor data."""
+        start_time = start.strftime("%Y-%m-%dT%H:%M:%SZ")
+        end_time = end.strftime("%Y-%m-%dT%H:%M:%SZ")
+        url = f"/sensors/{sensor_id}/data-range?start={start_time}&end={end_time}"
+        self.logger.info(f"📡 Fetching sensor measurements from {start_time} to {end_time}: {url}")
         return self.make_request(url)
 
-    def discover_sensors(self, **kwargs):
+    def get_sensor_latest_data(self, sensor_id):
+        """Fetch just the latest measurements for a sensor."""
+        url = f"/sensors/{sensor_id}/latest-data"
+        self.logger.info(f"📡 Fetching latest sensor measurements for {sensor_id}: {url}")
+        return self.make_request(url)
+
+    def discover_hub_sensors(self, **kwargs):
         """Discover all sensors and store their IDs."""
-        self.logger.info("🔍 Discovering hubs and sensors...")
+        self.logger.info("🔍 Discovering any hubs and their sensors...")
         hub_ids = self.get_hub_ids()
         if not hub_ids:
             self.logger.warning("⚠️ No hubs found, skipping sensor discovery.")
@@ -256,8 +264,8 @@ class PulseSensors(hass.Hass):
         self.set_state("sensor.pulse_discovered_sensors", state=json.dumps(discovered_sensors))
         self.logger.info(f"✅ Discovered {len(discovered_sensors)} sensors across {len(discovered_hubs)} hubs.")
 
-    def update_sensors(self, **kwargs):
-        """Fetch latest sensor data since the last recorded timestamp."""
+    def update_sensor_states(self, **kwargs):
+        """Update state for all discovered sensors, creating new entities if needed."""
         self.logger.info("🔄 Updating sensor data...")
 
         # Get last update timestamp
@@ -280,7 +288,7 @@ class PulseSensors(hass.Hass):
 
         for sensor_id, sensor_info in discovered_sensors.items():
             sensor_name = sensor_info["name"]
-            response = self.get_sensor_data(sensor_id, last_update)
+            response = self.get_sensor_data_range(sensor_id, last_update, datetime.now(timezone.utc))
 
             if not response:
                 self.logger.warning(f"⚠️ No data received for sensor {sensor_id}: {response}")
