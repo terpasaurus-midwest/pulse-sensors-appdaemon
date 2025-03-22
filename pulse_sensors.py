@@ -1,12 +1,13 @@
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from enum import IntEnum
+from typing import Any, List, Optional, Union
 import json
 import requests
 
+from pydantic import BaseModel, Field, ValidationError
 import hassapi as hass
 
 PULSE_API_KEY_ENTITY = "input_text.pulse_api_key"
-LAST_TIMESTAMP_ENTITY = "input_text.pulse_last_update"
 PULSE_API_BASE = "https://api.pulsegrow.com"
 API_TIMEOUT = 20
 SENSOR_UPDATE_INTERVAL = 600.0  # 10 minutes
@@ -68,19 +69,19 @@ class SensorReadingType(IntEnum):
     # Acclima (VWC1)
     VWC1_RH = 0  # VWC1 - Relative Humidity Reading
     VWC1_TEMPERATURE = 1  # VWC1 - Temperature Reading
-    VWC1_CONDUCTIVITY = 2  # VWC1 - Conductivity Reading
+    VWC1_CONDUCTIVITY = 2  # VWC1 - Bulk EC Reading
     VWC1_CONDUCTIVITY_PWE = 3  # VWC1 - Pore Water EC Reading
 
     # Growlink Terralink (VWC2)
     VWC2_RH = 4  # VWC2 - Relative Humidity Reading
     VWC2_TEMPERATURE = 5  # VWC2 - Temperature Reading
-    VWC2_CONDUCTIVITY = 6  # VWC2 - Conductivity Reading
+    VWC2_CONDUCTIVITY = 6  # VWC2 - Bulk EC Reading
     VWC2_CONDUCTIVITY_PWE = 7  # VWC2 - Pore Water EC Reading
 
     # TEROS 12 (VWC12)
     VWC12_RH = 8  # VWC12 - Relative Humidity Reading
     VWC12_TEMPERATURE = 9  # VWC12 - Temperature Reading
-    VWC12_CONDUCTIVITY = 10  # VWC12 - Conductivity Reading
+    VWC12_CONDUCTIVITY = 10  # VWC12 - Bulk EC Reading
     VWC12_CONDUCTIVITY_PWE = 11  # VWC12 - Pore Water EC Reading
 
     # General Readings
@@ -105,6 +106,124 @@ class SensorReadingType(IntEnum):
     def _missing_(cls, value):
         """Handles unknown values by returning the UNKNOWN enum member."""
         return cls.UNKNOWN
+
+
+class ThresholdType(IntEnum):
+    LIGHT = 1
+    TEMPERATURE = 2
+    HUMIDITY = 3
+    POWER = 4
+    CONNECTIVITY = 5
+    BATTERY_V = 6
+    CO2 = 7
+    VOC = 8
+    VPD = 11
+    DEW_POINT = 12
+
+
+class SensorThresholdType(IntEnum):
+    VWC1 = 1
+    TEMPERATURE = 2
+    HUMIDITY = 3
+    VPD = 4
+    DEW_POINT = 5
+    PH = 6
+    EC1_EC = 7
+    EC1_TEMP = 8
+    VWC1_PWEC = 9
+    VWC12_VWC = 10
+    VWC12_PWEC = 11
+    PAR1_PPFD = 12
+    SUBSTRATE_TEMP = 13
+    SUBSTRATE_BULK_EC = 14
+    PH1_TEMP = 15
+    PAR1_DLI = 16
+    VWC2_VWC = 17
+    VWC2_PWEC = 18
+    ORP1_ORP = 19
+    THC1_CO2 = 20
+    THC1_RH = 21
+    THC1_TEMP = 22
+    THC1_DEW_POINT = 23
+    THC1_VPD = 24
+    TDO1_TEMP = 25
+    TDO1_DO = 26
+    THC1_LIGHT = 27
+
+
+class HubThresholdType(IntEnum):
+    POWER = 1
+    CONNECTIVITY = 2
+
+
+class DataPointValue(BaseModel):
+    MeasuringUnit: str
+    ParamName: str
+    ParamValue: float
+
+
+class TriggeredThreshold(BaseModel):
+    id: int
+    createdAt: datetime
+    resolvedAt: Optional[datetime]
+    resolved: bool
+    thresholdId: int
+    thresholdType: Optional[ThresholdType]
+    deviceId: int
+    deviceName: str
+    lowOrHigh: bool
+    lowThresholdValue: float
+    highThresholdValue: float
+    triggeringValue: str
+    sensorThresholdType: Optional[SensorThresholdType]
+    hubThresholdType: Optional[HubThresholdType]
+
+
+class DataPointDto(BaseModel):
+    dataPointValues: List[DataPointValue]
+    triggeredThresholds: List[TriggeredThreshold] = Field(default_factory=list)
+    sensorId: int
+    createdAt: datetime
+
+
+class LatestSensorData(BaseModel):
+    sensorType: SensorType
+    deviceType: int
+    name: str
+    dataPointDto: DataPointDto
+
+
+class HubThreshold(BaseModel):
+    hubId: int
+    thresholdType: HubThresholdType
+    id: int
+    notificationActive: bool
+    lowThresholdValue: Optional[float]
+    highThresholdValue: Optional[float]
+    delay: str  # example: "00:03:00"
+    day: Optional[str]  # sometimes null
+
+
+class SensorDevice(BaseModel):
+    hubId: int
+    parSensorSubtype: Optional[str]
+    deviceType: int
+    sensorType: int
+    id: int
+    displayOrder: int
+    name: str
+    growId: int
+    hidden: bool
+
+
+class HubDetails(BaseModel):
+    id: int
+    name: str
+    hubThresholds: List[HubThreshold]
+    hidden: bool
+    macAddress: str
+    growId: int
+    sensorDevices: List[SensorDevice]
 
 
 class PulseSensors(hass.Hass):
@@ -168,7 +287,7 @@ class PulseSensors(hass.Hass):
 
         self.logger.info("🛑 Pulse Sensor app terminated.")
 
-    def make_request(self, endpoint, method="GET", **kwargs):
+    def make_request(self, endpoint: str, method: str = "GET", **kwargs) -> Union[dict[str, Any], list[Any], None]:
         """Unified method to make an API request to the Pulse API.
 
         This is mostly just exposing request.Session().request() for convenience.
@@ -191,39 +310,51 @@ class PulseSensors(hass.Hass):
                 return {}
             raise
 
-    def get_hub_ids(self):
+    def get_hub_ids(self) -> List[int]:
         """Fetch all hub IDs."""
         url = "/hubs/ids"
         self.logger.info(f"📡 Fetching hub IDs at: {url}")
         return self.make_request(url)
 
-    def get_hub_details(self, hub_id):
-        """Fetch hub details and sensors for a given hub.
+    def get_hub_details(self, hub_id: int) -> Optional[HubDetails]:
+        """Fetch and validate hub details and attached sensor devices.
 
-        Returns:
-        {
-            "id": hub_id,
-            "name": "Hub Name",
-            "sensorDevices": [{sensor_1_data}, {sensor_2_data}, ... ]
-        }
+        :param hub_id: The ID of the hub to fetch.
+        :return: A validated HubDetails object if successful, or None if request or validation fails.
         """
         url = f"/hubs/{hub_id}"
         self.logger.info(f"📡 Fetching hub details for {hub_id} at: {url}")
-        return self.make_request(url)
 
-    def get_sensor_data_range(self, sensor_id, start, end):
-        """Fetch a range of sensor data."""
-        start_time = start.strftime("%Y-%m-%dT%H:%M:%SZ")
-        end_time = end.strftime("%Y-%m-%dT%H:%M:%SZ")
-        url = f"/sensors/{sensor_id}/data-range?start={start_time}&end={end_time}"
-        self.logger.info(f"📡 Fetching sensor measurements from {start_time} to {end_time}: {url}")
-        return self.make_request(url)
+        response = self.make_request(url)
+        if not response:
+            self.logger.warning(f"⚠️ No data received for hub {hub_id}")
+            return None
 
-    def get_sensor_latest_data(self, sensor_id):
-        """Fetch just the latest measurements for a sensor."""
+        try:
+            return HubDetails(**response)
+        except ValidationError:
+            self.logger.exception(f"❌ Validation error for hub {hub_id}")
+            return None
+
+    def get_sensor_latest_data(self, sensor_id: int) -> Optional[LatestSensorData]:
+        """Fetch and validate the latest measurements for a sensor.
+
+        :param sensor_id: The ID of the sensor to fetch.
+        :return: A validated LatestSensorData object if successful, or None if request or validation fails.
+        """
         url = f"/sensors/{sensor_id}/latest-data"
         self.logger.info(f"📡 Fetching latest sensor measurements for {sensor_id}: {url}")
-        return self.make_request(url)
+
+        response = self.make_request(url)
+        if not response:
+            self.logger.warning(f"⚠️ No data received from sensor {sensor_id}")
+            return None
+
+        try:
+            return LatestSensorData(**response)
+        except ValidationError:
+            self.logger.exception(f"❌ Validation error for sensor {sensor_id}")
+            return None
 
     def discover_hub_sensors(self, **kwargs):
         """Discover all sensors and store their IDs."""
@@ -237,28 +368,15 @@ class PulseSensors(hass.Hass):
         discovered_hubs = {}
 
         for hub_id in hub_ids:
-            hub_data = self.get_hub_details(hub_id)
-            if not hub_data:
+            hub = self.get_hub_details(hub_id)
+            if hub is None:
                 self.logger.warning(f"⚠️ No data found for hub {hub_id}, skipping.")
                 continue
 
-            hub_name = hub_data.get("name", f"Hub {hub_id}")
-            discovered_hubs[hub_id] = hub_name
+            discovered_hubs[hub.id] = hub.name
 
-            for sensor in hub_data.get("sensorDevices", []):
-                sensor_id = sensor["id"]
-                sensor_name = sensor["name"]
-                discovered_sensors[sensor_id] = {
-                    "name": sensor_name,
-                    "hub_id": hub_id,
-                    "hub_name": hub_name,
-                    "sensor_type": sensor.get("sensorType"),
-                    "par_sensor_subtype": sensor.get("parSensorSubtype"),
-                    "device_type": sensor.get("deviceType"),
-                    "display_order": sensor.get("displayOrder"),
-                    "grow_id": sensor.get("growId"),
-                    "hidden": sensor.get("hidden", False),
-                }
+            for sensor in hub.sensorDevices:
+                discovered_sensors[sensor.id] = sensor.model_dump()
 
         self.set_state("sensor.pulse_discovered_hubs", state=json.dumps(discovered_hubs))
         self.set_state("sensor.pulse_discovered_sensors", state=json.dumps(discovered_sensors))
@@ -266,105 +384,31 @@ class PulseSensors(hass.Hass):
 
     def update_sensor_states(self, **kwargs):
         """Update state for all discovered sensors, creating new entities if needed."""
-        self.logger.info("🔄 Updating sensor data...")
-
-        # Get last update timestamp
-        last_update_str = self.get_state(LAST_TIMESTAMP_ENTITY)
-        if last_update_str and last_update_str != "unknown":
-            last_update = datetime.strptime(last_update_str, "%Y-%m-%dT%H:%M:%SZ")
-        else:
-            # get data from the last hour by default
-            last_update = datetime.now(timezone.utc) - timedelta(hours=1)
-
-        self.logger.info(f"📅 Last update was determined to be: {last_update.isoformat()}")
-
-        sensor_data = self.get_state("sensor.pulse_discovered_sensors")
-        if not sensor_data:
+        state = self.get_state("sensor.pulse_discovered_sensors")
+        if not state:
             self.logger.warning("⚠️ No sensors discovered yet, skipping update.")
             return
 
-        discovered_sensors = json.loads(sensor_data)
-        new_timestamp = last_update
+        discovered_sensors = json.loads(state)
 
         for sensor_id, sensor_info in discovered_sensors.items():
-            sensor_name = sensor_info["name"]
-            response = self.get_sensor_data_range(sensor_id, last_update, datetime.now(timezone.utc))
+            sensor = self.get_sensor_latest_data(sensor_id)
 
-            if not response:
-                self.logger.warning(f"⚠️ No data received for sensor {sensor_id}: {response}")
+            if sensor is None:
                 continue
 
-            required_keys = {"dataPointValues", "dataPointValuesCreatedAt"}
-            if not isinstance(response, dict) or not required_keys.issubset(response):
-                self.logger.warning(
-                    f"⚠️ Data received wasn't structured as expected for '{sensor_id}-{sensor_name}': {response}"
-                )
-                continue
+            for point in sensor.dataPointDto.dataPointValues:
+                param_name = point.ParamName.replace(" ", "_").lower()
+                entity_id = f"sensor.pulse_{sensor_id}_{param_name}"
 
-            timestamps = response["dataPointValuesCreatedAt"]
-            if not timestamps:
-                self.logger.warning(f"⚠️ No timestamps available for sensor {sensor_id}. Skipping.")
-                continue
-
-            # Each sensor provides datapoints for various parameters, like temperature,
-            # humidity, dew point, etc. Each dictionary in this list has keys describing
-            # the parameter being measured: "MeasuringUnit", "ParamName", "ParamValues".
-            # All of these are string values.
-            for metadata in response["dataPointValues"]:
-                param_name = metadata["ParamName"]
-                measuring_unit = metadata["MeasuringUnit"]
-
-                # This is absolutely absurd, but the Pulse APIs data model here is at fault.
-                # The individual datapoint values, which map to each timestamp in
-                # data["dataPointValuesCreatedAt"], are encoded as a comma-separated string here.
-                # Like: "66.6, 66.7, 66.6, 70, 68.2".
-
-                # Split the string on comma, into a list. Then coerce each string value into a float.
-                try:
-                    datapoint_values = list(map(float, metadata["ParamValues"].split(", ")))
-                except ValueError:
-                    self.logger.warning(
-                        f"⚠️ Failed to parse values for {sensor_id}-{sensor_name}: {metadata['ParamValues']}")
-                    continue
-
-                # We should have an equal number of datapoints to map to our timestamps, or something is wrong
-                if len(datapoint_values) != len(timestamps):
-                    self.logger.warning(
-                        f"⚠️ Mismatch in lengths for {sensor_id}-{sensor_name} "
-                        f"({len(datapoint_values)} values, {len(timestamps)} timestamps). Skipping."
-                    )
-                    continue
-
-                # Map each timestamp to its corresponding sensor value
-                for i, timestamp in enumerate(timestamps):
-                    entry_time = datetime.strptime(
-                        timestamp, "%Y-%m-%dT%H:%M:%S"
-                    ).replace(tzinfo=timezone.utc)
-
-                    if entry_time > new_timestamp:
-                        new_timestamp = entry_time
-
-                    # Normalize param names, they can look like e.g. "Dew Point"
-                    # This would make them "dew_point"
-                    sensor_key = param_name.lower().replace(" ", "_")
-                    sensor_value = datapoint_values[i]
-
-                    # Construct state key dynamically
-                    state_key = f"sensor.pulse_{sensor_id}_{sensor_key}"
-
-                    # Use the provided measuring unit instead of a hardcoded map
-                    unit = measuring_unit if measuring_unit else "N/A"
-
-                    # Set state in Home Assistant
-                    self.set_state(
-                        state_key,
-                        state=sensor_value,
-                        attributes={
-                            "unit_of_measurement": unit,
-                            "friendly_name": f"{param_name} - {sensor_name}"
-                        },
-                    )
-
-        if new_timestamp > last_update:
-            self.set_state(LAST_TIMESTAMP_ENTITY, state=new_timestamp.strftime("%Y-%m-%dT%H:%M:%SZ"))
-            self.logger.info(f"🏁 Updated last timestamp to: {new_timestamp.isoformat()}")
+                self.logger.info(
+                    f"🔄 Updating sensor entity: {sensor_id}:{sensor.sensorType.name} {param_name}")
+                self.set_state(entity_id, state=point.ParamValue, attributes={
+                    "unit_of_measurement": point.MeasuringUnit,
+                    "parameter_name": f"{point.ParamName}",
+                    "sensor_name": sensor.name,
+                    "sensor_id": sensor_id,
+                    "sensor_type": sensor.sensorType,
+                    "sensor_type_name": sensor.sensorType.name,
+                    "measured_at": sensor.dataPointDto.createdAt.isoformat(),
+                })
