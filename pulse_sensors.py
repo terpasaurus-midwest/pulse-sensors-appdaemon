@@ -364,7 +364,7 @@ class PulseSensors(hass.Hass):
             self.logger.warning("⚠️ No hubs found, skipping sensor discovery.")
             return
 
-        discovered_sensors = {}
+        discovered_sensor_ids = []
         discovered_hubs = {}
 
         for hub_id in hub_ids:
@@ -376,22 +376,32 @@ class PulseSensors(hass.Hass):
             discovered_hubs[hub.id] = hub.name
 
             for sensor in hub.sensorDevices:
-                discovered_sensors[sensor.id] = sensor.model_dump()
+                discovered_sensor_ids.append(sensor.id)
 
-        self.set_state("sensor.pulse_discovered_hubs", state=json.dumps(discovered_hubs))
-        self.set_state("sensor.pulse_discovered_sensors", state=json.dumps(discovered_sensors))
-        self.logger.info(f"✅ Discovered {len(discovered_sensors)} sensors across {len(discovered_hubs)} hubs.")
+        self.set_state(
+    "sensor.pulse_discovered_hubs",
+            state=str(len(discovered_hubs)),
+            attributes=discovered_hubs,  # type: ignore
+        )
+        self.set_state(
+            "sensor.pulse_discovered_sensors",
+            state=str(len(discovered_sensor_ids)),
+            attributes={"sensor_ids": discovered_sensor_ids},  # type: ignore
+        )
+        self.logger.info(f"✅ Discovered {len(discovered_sensor_ids)} sensors across {len(discovered_hubs)} hubs.")
 
     def update_sensor_states(self, **kwargs):
         """Update state for all discovered sensors, creating new entities if needed."""
-        state = self.get_state("sensor.pulse_discovered_sensors")
-        if not state:
+        discovered_sensors = self.get_state(
+            "sensor.pulse_discovered_sensors",
+            attribute="sensor_ids",  # type: ignore
+        )
+
+        if not discovered_sensors:
             self.logger.warning("⚠️ No sensors discovered yet, skipping update.")
             return
 
-        discovered_sensors = json.loads(state)
-
-        for sensor_id, sensor_info in discovered_sensors.items():
+        for sensor_id in discovered_sensors:  # type: ignore
             sensor = self.get_sensor_latest_data(sensor_id)
 
             if sensor is None:
