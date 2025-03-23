@@ -1,6 +1,7 @@
 from datetime import datetime
 from enum import IntEnum
 from typing import Any, List, Optional, Union
+import base64
 import json
 import requests
 
@@ -364,8 +365,8 @@ class PulseSensors(hass.Hass):
             self.logger.warning("⚠️ No hubs found, skipping sensor discovery.")
             return
 
-        discovered_sensor_ids = []
-        discovered_hubs = {}
+        discovered_sensor_count = 0
+        discovered_hubs = []
 
         for hub_id in hub_ids:
             hub = self.get_hub_details(hub_id)
@@ -373,52 +374,51 @@ class PulseSensors(hass.Hass):
                 self.logger.warning(f"⚠️ No data found for hub {hub_id}, skipping.")
                 continue
 
-            discovered_hubs[hub.id] = hub.name
+            discovered_hubs.append(hub.model_dump())
+            discovered_sensor_count += len(hub.sensorDevices)
 
-            for sensor in hub.sensorDevices:
-                discovered_sensor_ids.append(sensor.id)
-
+        hub_data_b64 = base64.b64encode(json.dumps(discovered_hubs).encode()).decode()
         self.set_state(
-    "sensor.pulse_discovered_hubs",
-            state=str(len(discovered_hubs)),
-            attributes=discovered_hubs,  # type: ignore
+            "sensor.pulse_discovered_hubs",
+            state=len(discovered_hubs),
+            attributes={"b64_data": hub_data_b64}
         )
-        self.set_state(
-            "sensor.pulse_discovered_sensors",
-            state=str(len(discovered_sensor_ids)),
-            attributes={"sensor_ids": discovered_sensor_ids},  # type: ignore
-        )
-        self.logger.info(f"✅ Discovered {len(discovered_sensor_ids)} sensors across {len(discovered_hubs)} hubs.")
+        self.set_state("sensor.pulse_discovered_sensors", state=discovered_sensor_count)
+        self.logger.info(f"✅ Discovered {discovered_sensor_count} sensors across {len(discovered_hubs)} hubs.")
 
     def update_sensor_states(self, **kwargs):
         """Update state for all discovered sensors, creating new entities if needed."""
-        discovered_sensors = self.get_state(
-            "sensor.pulse_discovered_sensors",
-            attribute="sensor_ids",  # type: ignore
+        discovered_hubs_state = self.get_state(
+            "sensor.pulse_discovered_hubs",
+            attribute="b64_data",  # type: ignore
         )
 
-        if not discovered_sensors:
+        if not discovered_hubs_state:
             self.logger.warning("⚠️ No sensors discovered yet, skipping update.")
             return
 
-        for sensor_id in discovered_sensors:  # type: ignore
-            sensor = self.get_sensor_latest_data(sensor_id)
+        discovered_hubs = json.loads(base64.b64decode(str(discovered_hubs_state)).decode())
+        for hub in discovered_hubs:
+            for device in hub["sensorDevices"]:
+                sensor = self.get_sensor_latest_data(device["id"])
 
-            if sensor is None:
-                continue
+                if sensor is None:
+                    continue
 
-            for point in sensor.dataPointDto.dataPointValues:
-                param_name = point.ParamName.replace(" ", "_").lower()
-                entity_id = f"sensor.pulse_{sensor_id}_{param_name}"
+                for measurement in sensor.dataPointDto.dataPointValues:
+                    param_name = measurement.ParamName.replace(" ", "_").lower()
+                    sensor_type_name = sensor.sensorType.name.replace(" ", "_").lower()
+                    entity_id = f"sensor.pulse_{hub['id']}_{device['id']}_{sensor_type_name}_{param_name}"
 
-                self.logger.info(
-                    f"🔄 Updating sensor entity: {sensor_id}:{sensor.sensorType.name} {param_name}")
-                self.set_state(entity_id, state=point.ParamValue, attributes={
-                    "unit_of_measurement": point.MeasuringUnit,
-                    "parameter_name": f"{point.ParamName}",
-                    "sensor_name": sensor.name,
-                    "sensor_id": sensor_id,
-                    "sensor_type": sensor.sensorType,
-                    "sensor_type_name": sensor.sensorType.name,
-                    "measured_at": sensor.dataPointDto.createdAt.isoformat(),
-                })
+                    self.logger.info(
+                        f"🔄 Updating sensor entity: {device['id']} {sensor_type_name} {param_name}")
+                    self.set_state(entity_id, state=measurement.ParamValue, attributes={
+                        "hub_id": hub["id"],
+                        "unit_of_measurement": measurement.MeasuringUnit,
+                        "parameter_name": f"{measurement.ParamName}",
+                        "sensor_name": sensor.name,
+                        "sensor_id": device["id"],
+                        "sensor_type": sensor.sensorType,
+                        "sensor_type_name": sensor.sensorType.name,
+                        "measured_at": sensor.dataPointDto.createdAt.isoformat(),
+                    })
