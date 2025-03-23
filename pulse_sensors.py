@@ -342,7 +342,7 @@ class PulseSensors(hass.Hass):
         :param sensor_id: The ID of the sensor to fetch.
         :return: A validated LatestSensorData object if successful, or None if request or validation fails.
         """
-        url = f"/sensors/{sensor_id}/latest-data"
+        url = f"/sensors/{sensor_id}/recent-data"
         self.logger.info(f"📡 Fetching latest sensor measurements for {sensor_id}: {url}")
 
         response = self.make_request(url)
