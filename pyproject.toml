@@ -10,7 +10,8 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "hassapi (==0.2.1)",
-    "pydantic (>=2.10.6,<3.0.0)"
+    "pydantic (>=2.10.6,<3.0.0)",
+    "paho-mqtt (>=2.1.0,<3.0.0)"
 ]
 
 [build-system]

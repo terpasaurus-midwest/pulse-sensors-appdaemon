@@ -150,6 +150,26 @@ class PulseSensors(hass.Hass):
             self.logger.exception(f"❌ Validation error for sensor {sensor_id}")
             return None
 
+    def discover_hubs(self, **kwargs):
+        """Discover hub IDs and store them as base64-encoded JSON in the sensor state."""
+        self.logger.info("🔍 Discovering Pulse hub IDs...")
+        hub_ids = self.get_hub_ids()
+        if not hub_ids:
+            self.logger.warning("⚠️ No hubs found.")
+            return
+
+        # dict → str → bytes → base64 bytes
+        hub_ids_str = json.dumps(hub_ids)
+        hub_ids_b64 = base64.b64encode(hub_ids_str.encode())
+
+        self.set_state(
+            "sensor.pulse_discovered_hubs",
+            state=hub_ids_b64.decode("utf-8"),
+            attributes={"hub_ids": hub_ids_str},
+        )
+
+        self.logger.info(f"✅ Stored {len(hub_ids)} hub IDs (base64-encoded).")
+
     def discover_hub_sensors(self, **kwargs):
         """Discover all sensors and store their IDs."""
         self.logger.info("🔍 Discovering any hubs and their sensors...")
@@ -170,11 +190,10 @@ class PulseSensors(hass.Hass):
             discovered_hubs.append(hub.model_dump())
             discovered_sensor_count += len(hub.sensorDevices)
 
-        hub_data_b64 = base64.b64encode(json.dumps(discovered_hubs).encode()).decode()
         self.set_state(
             "sensor.pulse_discovered_hubs",
             state=len(discovered_hubs),
-            attributes={"b64_data": hub_data_b64}
+            attributes={"hubs": discovered_hubs}
         )
         self.set_state("sensor.pulse_discovered_sensors", state=discovered_sensor_count)
         self.logger.info(f"✅ Discovered {discovered_sensor_count} sensors across {len(discovered_hubs)} hubs.")
