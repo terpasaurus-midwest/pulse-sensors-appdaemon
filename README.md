@@ -20,7 +20,8 @@ updates** Home Assistant sensor entities for them on the fly—no manual configu
 ## What This Integration Does
 - **Auto-discovers Pulse Hubs** using the API  
 - **Creates & Updates** Home Assistant sensor entities **dynamically**  
-- **Polls most recent data** at a configurable interval  
+- **Polls most recent data** at a configurable interval
+- **Publishes MQTT discovery & states** on `pulse/<device_id>/<param_name>` topics
 - **Supports a wide range of sensor types**
 - **Allows Home Assistant automations** to act on sensor readings
 - **Supports recording the state updates using the Home Assistant Recorder addon
@@ -46,8 +47,12 @@ Home Assistant (and Recorder) is ill-suited as a big-data analytics platform for
 integration is designed to be generic for scalability. The focus is on current data, not loading historical
 time-series from Pulse Hub.
 
-I have a separate big data analytics pipeline project more suited for this purpose, using serverless
-infrastructure. Once that is ready, I will share that Terraform or CloudFormation template here. It uses the scheduled
-exports functionality in the Pulse App, to automate loading scheduled CSV exports into object storage (S3), and exposing
-the data to AWS Glue and Amazon Athena. It can then be queried or transformed and loaded to any other tooling, where
-you can perform regression analytics/forecasting, etc.
+## Mock API Responses
+Sample API responses are saved under `mock_responses/`. These were captured by calling the Pulse API endpoints used by
+the app. The folder currently contains:
+
+- `hubs_ids.json` – response from `GET /hubs/ids`
+- `hub_${PULSE_HUB_ID}.json` – response from `GET /hubs/{hubId}` using the example hub ID
+- `sensor_recent_data_${PULSE_THV_ID}.json` – response from `GET /sensors/{sensor_id}/recent-data` for the THV sensor
+- `sensor_recent_data_${PULSE_VWC_ID}.json` – response from `GET /sensors/{sensor_id}/recent-data` for the VWC sensor
+- `unauthorized_operation.json` - response when making an unprivileged call to an endpoint requiring authentication

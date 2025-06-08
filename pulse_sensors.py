@@ -1,21 +1,29 @@
 from typing import Any, List, Optional, Union
-import base64
 import json
 import requests
+import textwrap
 
 from pydantic import ValidationError
 import hassapi as hass
+import mqttapi as mqtt
 
-from pulse_models import HubDetails, LatestSensorData
+from pulse_models import HubDetails, LatestSensorData, DeviceClass
+
+__version__ = '0.1.0'
 
 PULSE_API_KEY_ENTITY = "input_text.pulse_api_key"
 PULSE_API_BASE = "https://api.pulsegrow.com"
 API_TIMEOUT = 10.0
 SENSOR_UPDATE_INTERVAL = 60.0  # 1 minutes
 SENSOR_DISCOVERY_INTERVAL = 3600.0  # 1 hour
+MQTT_ORIGIN_INFO = {
+    "name": "Pulse Sensors AppDaemon",
+    "sw": str(__version__),
+    "url": "https://github.com/terpasaurus-midwest/pulse-sensors-appdaemon",
+},
 
 
-class PulseSensors(hass.Hass):
+class PulseSensors(hass.Hass, mqtt.Mqtt):
     def initialize(self):
         """Initialize periodic updates and set up API session."""
         self.logger = self.get_user_log("pulse_sensors")
@@ -58,12 +66,12 @@ class PulseSensors(hass.Hass):
         """Reconfigure intervals when input_number changes."""
         new_interval = int(float(new))
 
-        if entity == "input_number.pulse_update_interval":
+        if entity == "input_number.sensor_update_interval":
             self.cancel_timer(self.sensor_update_job_uuid)
             self.sensor_update_job_uuid = self.run_every(self.update_sensor_states, "now", new_interval)
             self.logger.info(f"📝️ Updated sensor state update interval to {new_interval} sec")
 
-        elif entity == "input_number.pulse_discover_interval":
+        elif entity == "input_number.sensor_discovery_interval":
             self.cancel_timer(self.sensor_discover_job_uuid)
             self.sensor_discover_job_uuid = self.run_every(self.discover_hub_sensors, "now", new_interval)
             self.logger.info(f"📝️ Updated hub sensor discovery interval to {new_interval} sec")
@@ -167,30 +175,91 @@ class PulseSensors(hass.Hass):
                 self.logger.warning(f"⚠️ No data found for hub {hub_id}, skipping.")
                 continue
 
-            discovered_hubs.append(hub.model_dump())
-            discovered_sensor_count += len(hub.sensorDevices)
+            # The hub mac doesn't use colons, so convert it to a string that does
+            hub_mac_address = ":".join(textwrap.wrap(hub.macAddress, 2))
+            hub_unique_id = f"pulse_hub_{hub.id}"
+            hub_payload = {
+                "o": MQTT_ORIGIN_INFO,
+                "dev": {
+                    "ids": hub_unique_id,
+                    "name": hub.name,
+                    "mf": "Pulse Labs, Inc.",
+                    "mdl": "Pulse Hub",
+                    "mdl_id": "HUB",
+                    "cns": [
+                        ["mac", hub_mac_address]
+                    ],
+                }
+            }
+            hub_config_topic = f"homeassistant/device/{hub_unique_id}/config"
+            self.mqtt_publish(
+                topic=hub_config_topic,
+                payload=json.dumps(hub_payload),
+                retain=True,
+            )
 
-        hub_data_b64 = base64.b64encode(json.dumps(discovered_hubs).encode()).decode()
+            discovered_hubs.append(hub.model_dump())
+
+            for device in hub.sensorDevices:
+                latest = self.get_sensor_latest_data(device.id)
+                if latest is None:
+                    continue
+
+                sensor_type_name = latest.sensorType.name.replace(" ", "_").lower()
+                device_unique_id = f"pulse_{sensor_type_name}_{device.id}"
+
+                components: dict[str, dict[str, Any]] = {}
+                for measurement in latest.dataPointDto.dataPointValues:
+                    param_name = measurement.ParamName.replace(" ", "_").lower()
+                    comp_unique_id = f"{device_unique_id}_{param_name}"
+                    components[comp_unique_id] = {
+                        "p": "sensor",
+                        "name": f"{measurement.ParamName}",
+                        "unique_id": comp_unique_id,
+                        "unit_of_measurement": measurement.MeasuringUnit,
+                        "value_template": f"{{{{ value_json.{param_name} }}}}",
+                        "device_class": DeviceClass.from_param_name(measurement.ParamName),
+                    }
+                    discovered_sensor_count += 1
+
+                device_payload = {
+                    "o": MQTT_ORIGIN_INFO,
+                    "dev": {
+                        "ids": device_unique_id,
+                        "name": f"{latest.name}",
+                        "mf": "Pulse Labs, Inc.",
+                        "mdl": f"Pulse {latest.sensorType.name} Sensor",
+                        "mdl_id": latest.sensorType.name,
+                        "via_device": hub_unique_id,
+                    },
+                    "cmps": components,
+                    "stat_t": f"pulse/{device.id}/state",
+                }
+                device_config_topic = f"homeassistant/device/{device_unique_id}/config"
+                self.mqtt_publish(
+                    topic=device_config_topic,
+                    payload=json.dumps(device_payload),
+                    retain=True,
+                )
+
         self.set_state(
             "sensor.pulse_discovered_hubs",
             state=len(discovered_hubs),
-            attributes={"b64_data": hub_data_b64}
+            attributes={"hubs": discovered_hubs}
         )
         self.set_state("sensor.pulse_discovered_sensors", state=discovered_sensor_count)
         self.logger.info(f"✅ Discovered {discovered_sensor_count} sensors across {len(discovered_hubs)} hubs.")
 
     def update_sensor_states(self, **kwargs):
         """Update state for all discovered sensors, creating new entities if needed."""
-        discovered_hubs_state = self.get_state(
+        discovered_hubs = self.get_state(
             "sensor.pulse_discovered_hubs",
-            attribute="b64_data",  # type: ignore
+            attribute="hubs",
         )
 
-        if not discovered_hubs_state:
+        if not discovered_hubs:
             self.logger.warning("⚠️ No sensors discovered yet, skipping update.")
             return
-
-        discovered_hubs = json.loads(base64.b64decode(str(discovered_hubs_state)).decode())
         for hub in discovered_hubs:
             for device in hub["sensorDevices"]:
                 sensor = self.get_sensor_latest_data(device["id"])
@@ -198,20 +267,26 @@ class PulseSensors(hass.Hass):
                 if sensor is None:
                     continue
 
+                sensor_type_name = sensor.sensorType.name.replace(" ", "_").lower()
+                device_unique_id = f"pulse_{sensor_type_name}_{device['id']}"
                 for measurement in sensor.dataPointDto.dataPointValues:
                     param_name = measurement.ParamName.replace(" ", "_").lower()
-                    sensor_type_name = sensor.sensorType.name.replace(" ", "_").lower()
-                    entity_id = f"sensor.pulse_{hub['id']}_{device['id']}_{sensor_type_name}_{param_name}"
+                    entity_id = f"sensor.{device_unique_id}_{param_name}"
 
                     self.logger.info(
                         f"🔄 Updating sensor entity: {device['id']} {sensor_type_name} {param_name}")
-                    self.set_state(entity_id, state=measurement.ParamValue, attributes={
-                        "hub_id": hub["id"],
-                        "unit_of_measurement": measurement.MeasuringUnit,
-                        "parameter_name": f"{measurement.ParamName}",
-                        "sensor_name": sensor.name,
-                        "sensor_id": device["id"],
-                        "sensor_type": sensor.sensorType,
-                        "sensor_type_name": sensor.sensorType.name,
-                        "measured_at": sensor.dataPointDto.createdAt.isoformat(),
-                    })
+
+                    self.set_state(
+                        entity_id,
+                        state=measurement.ParamValue,
+                        attributes={
+                            "hub_id": hub["id"],
+                            "unit_of_measurement": measurement.MeasuringUnit,
+                            "parameter_name": f"{measurement.ParamName}",
+                            "sensor_name": sensor.name,
+                            "sensor_id": device["id"],
+                            "sensor_type": sensor.sensorType,
+                            "sensor_type_name": sensor.sensorType.name,
+                            "measured_at": sensor.dataPointDto.createdAt.isoformat(),
+                        },
+                    )
