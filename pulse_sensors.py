@@ -5,6 +5,7 @@ import requests
 
 from pydantic import ValidationError
 import hassapi as hass
+import paho.mqtt.client as mqtt
 
 from pulse_models import HubDetails, LatestSensorData
 
@@ -13,6 +14,12 @@ PULSE_API_BASE = "https://api.pulsegrow.com"
 API_TIMEOUT = 10.0
 SENSOR_UPDATE_INTERVAL = 60.0  # 1 minutes
 SENSOR_DISCOVERY_INTERVAL = 3600.0  # 1 hour
+
+MQTT_HOST_ENTITY = "input_text.mqtt_host"
+MQTT_PORT_ENTITY = "input_number.mqtt_port"
+MQTT_USERNAME_ENTITY = "input_text.mqtt_username"
+MQTT_PASSWORD_ENTITY = "input_text.mqtt_password"
+MQTT_PORT_DEFAULT = 1883
 
 
 class PulseSensors(hass.Hass):
@@ -29,6 +36,24 @@ class PulseSensors(hass.Hass):
         self._session = requests.Session()
         self._session.headers.update({"x-api-key": self.api_key})
         self.logger.info("🔗 Created persistent Pulse API session.")
+
+        # Read MQTT connection details
+        mqtt_host = self.get_state(MQTT_HOST_ENTITY)
+        mqtt_port = int(float(self.get_state(MQTT_PORT_ENTITY) or MQTT_PORT_DEFAULT))
+        mqtt_username = self.get_state(MQTT_USERNAME_ENTITY)
+        mqtt_password = self.get_state(MQTT_PASSWORD_ENTITY)
+
+        self.mqtt_client = mqtt.Client()
+        if mqtt_username or mqtt_password:
+            self.mqtt_client.username_pw_set(mqtt_username, mqtt_password)
+        try:
+            self.mqtt_client.connect(mqtt_host, mqtt_port, 60)
+            self.mqtt_client.loop_start()
+            self.logger.info(
+                f"🔗 Connected to MQTT broker at {mqtt_host}:{mqtt_port}"
+            )
+        except Exception:  # pragma: no cover - network/HA connectivity
+            self.logger.exception("❌ Failed to connect to MQTT broker")
 
         # Read update intervals from Home Assistant inputs
         update_interval = int(float(
@@ -73,6 +98,14 @@ class PulseSensors(hass.Hass):
         if hasattr(self, "_session"):
             self._session.close()
             self.logger.info("🛑 Closed Pulse API session.")
+
+        if hasattr(self, "mqtt_client"):
+            try:
+                self.mqtt_client.loop_stop()
+                self.mqtt_client.disconnect()
+                self.logger.info("🛑 Disconnected MQTT client.")
+            except Exception:  # pragma: no cover - network/HA connectivity
+                self.logger.exception("❌ Error disconnecting MQTT client")
 
         self.logger.info("🛑 Pulse Sensor app terminated.")
 
@@ -187,8 +220,37 @@ class PulseSensors(hass.Hass):
                 self.logger.warning(f"⚠️ No data found for hub {hub_id}, skipping.")
                 continue
 
-            discovered_hubs.append(hub.model_dump())
-            discovered_sensor_count += len(hub.sensorDevices)
+            hub_dict = hub.model_dump()
+            discovered_hubs.append(hub_dict)
+
+            for device in hub.sensorDevices:
+                sensor = self.get_sensor_latest_data(device.id)
+                if sensor is None:
+                    continue
+                discovered_sensor_count += 1
+                for measurement in sensor.dataPointDto.dataPointValues:
+                    param_name = measurement.ParamName.replace(" ", "_").lower()
+                    unique_id = f"{hub.id}_{device.id}_{param_name}"
+                    state_topic = f"pulse/{hub.id}/{device.id}/{param_name}"
+                    config_topic = (
+                        f"homeassistant/sensor/{hub.id}_{device.id}_{param_name}/config"
+                    )
+                    payload = {
+                        "unique_id": unique_id,
+                        "state_topic": state_topic,
+                        "name": f"{hub.name} {sensor.name} {measurement.ParamName}",
+                        "unit_of_measurement": measurement.MeasuringUnit,
+                        "device": {
+                            "identifiers": [f"pulse_hub_{hub.id}"],
+                            "name": hub.name,
+                            "manufacturer": "Pulse Grow",
+                            "model": sensor.sensorType.name,
+                        },
+                    }
+                    self.mqtt_client.publish(
+                        config_topic, json.dumps(payload), retain=True
+                    )
+
 
         self.set_state(
             "sensor.pulse_discovered_hubs",
@@ -217,18 +279,10 @@ class PulseSensors(hass.Hass):
 
                 for measurement in sensor.dataPointDto.dataPointValues:
                     param_name = measurement.ParamName.replace(" ", "_").lower()
-                    sensor_type_name = sensor.sensorType.name.replace(" ", "_").lower()
-                    entity_id = f"sensor.pulse_{hub['id']}_{device['id']}_{sensor_type_name}_{param_name}"
+                    state_topic = f"pulse/{hub['id']}/{device['id']}/{param_name}"
 
                     self.logger.info(
-                        f"🔄 Updating sensor entity: {device['id']} {sensor_type_name} {param_name}")
-                    self.set_state(entity_id, state=measurement.ParamValue, attributes={
-                        "hub_id": hub["id"],
-                        "unit_of_measurement": measurement.MeasuringUnit,
-                        "parameter_name": f"{measurement.ParamName}",
-                        "sensor_name": sensor.name,
-                        "sensor_id": device["id"],
-                        "sensor_type": sensor.sensorType,
-                        "sensor_type_name": sensor.sensorType.name,
-                        "measured_at": sensor.dataPointDto.createdAt.isoformat(),
-                    })
+                        f"🔄 Publishing sensor update: {device['id']} {param_name}")
+                    self.mqtt_client.publish(
+                        state_topic, measurement.ParamValue, retain=True
+                    )

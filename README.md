@@ -17,6 +17,18 @@ updates** Home Assistant sensor entities for them on the fly—no manual configu
 - **[Pulse Grow API Access](https://api.pulsegrow.com/docs/index.html)**: API key required.
 - **[Pulse Sensors](https://pulsegrow.com/collections/everything-hub)**: A Pulse Hub and at least 1 connected sensor.
 
+## Required Home Assistant Inputs
+
+Create the following helper entities in Home Assistant so the app can read your configuration values:
+
+- `input_text.pulse_api_key` – your Pulse Grow API key
+- `input_number.sensor_update_interval` – seconds between polling sensor data
+- `input_number.sensor_discovery_interval` – seconds between discovery checks
+- `input_text.mqtt_host` – MQTT broker host
+- `input_number.mqtt_port` – MQTT broker port (default 1883)
+- `input_text.mqtt_username` – MQTT username
+- `input_text.mqtt_password` – MQTT password
+
 ## What This Integration Does
 - **Auto-discovers Pulse Hubs** using the API  
 - **Creates & Updates** Home Assistant sensor entities **dynamically**  
