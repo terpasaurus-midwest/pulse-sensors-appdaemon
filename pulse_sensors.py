@@ -166,6 +166,8 @@ class PulseSensors(hass.Hass, mqtt.Mqtt):
             self.logger.warning("⚠️ No hubs found, skipping sensor discovery.")
             return
 
+        self.logger.info(f"🔍 Discovery: Found {len(hub_ids)} hub devices, getting details...")
+
         discovered_sensor_count = 0
         discovered_hubs = []
 
@@ -174,6 +176,8 @@ class PulseSensors(hass.Hass, mqtt.Mqtt):
             if hub is None:
                 self.logger.warning(f"⚠️ No data found for hub {hub_id}, skipping.")
                 continue
+
+            self.logger.info(f"🔍 Discovery: Data found for hub {hub_id}, generating MQTT payload...")
 
             # The hub mac doesn't use colons, so convert it to a string that does
             hub_mac_address = ":".join(textwrap.wrap(hub.macAddress, 2))
@@ -192,6 +196,8 @@ class PulseSensors(hass.Hass, mqtt.Mqtt):
                 }
             }
             hub_config_topic = f"homeassistant/device/{hub_unique_id}/config"
+
+            self.logger.info(f"🔍 Discovery: Publishing discovery message for hub {hub_id}@{hub_config_topic}...")
             self.mqtt_publish(
                 topic=hub_config_topic,
                 payload=json.dumps(hub_payload),
@@ -199,6 +205,11 @@ class PulseSensors(hass.Hass, mqtt.Mqtt):
             )
 
             discovered_hubs.append(hub.model_dump())
+
+            if hub.sensorDevices:
+                self.logger.info(f"🔍 Discovery: processing {len(hub.sensorDevices)} connected devices on {hub_id}...")
+            else:
+                self.logger.info(f"🔍 Discovery: no devices found connected to this hub: {hub_id} ")
 
             for device in hub.sensorDevices:
                 latest = self.get_sensor_latest_data(device.id)
@@ -208,6 +219,7 @@ class PulseSensors(hass.Hass, mqtt.Mqtt):
                 sensor_type_name = latest.sensorType.name.replace(" ", "_").lower()
                 device_unique_id = f"pulse_{sensor_type_name}_{device.id}"
 
+                self.logger.info(f"🔍 Discovery: found device {device_unique_id}, processing its components")
                 components: dict[str, dict[str, Any]] = {}
                 for measurement in latest.dataPointDto.dataPointValues:
                     param_name = measurement.ParamName.replace(" ", "_").lower()
@@ -222,6 +234,7 @@ class PulseSensors(hass.Hass, mqtt.Mqtt):
                     }
                     discovered_sensor_count += 1
 
+                self.logger.info(f"🔍 Discovery: generating MQTT payload for device {device_unique_id}...")
                 device_payload = {
                     "o": MQTT_ORIGIN_INFO,
                     "dev": {
@@ -236,6 +249,8 @@ class PulseSensors(hass.Hass, mqtt.Mqtt):
                     "stat_t": f"pulse/{device.id}/state",
                 }
                 device_config_topic = f"homeassistant/device/{device_unique_id}/config"
+
+                self.logger.info(f"🔍 Discovery: Publishing discovery message for device {device_unique_id}@{device_config_topic}...")
                 self.mqtt_publish(
                     topic=device_config_topic,
                     payload=json.dumps(device_payload),
