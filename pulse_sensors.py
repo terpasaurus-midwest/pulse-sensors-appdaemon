@@ -228,13 +228,14 @@ class PulseSensors(hass.Hass, mqtt.Mqtt):
                 for measurement in latest.dataPointDto.dataPointValues:
                     param_name = measurement.ParamName.replace(" ", "_").lower()
                     comp_unique_id = f"{device_unique_id}_{param_name}"
+                    device_class_enum = DeviceClass.from_param_name(measurement.ParamName)
                     components[comp_unique_id] = {
                         "p": "sensor",
                         "name": f"{measurement.ParamName}",
                         "unique_id": comp_unique_id,
                         "unit_of_measurement": measurement.MeasuringUnit,
                         "value_template": f"{{{{ value_json.{param_name} }}}}",
-                        "device_class": DeviceClass.from_param_name(measurement.ParamName),
+                        "device_class": device_class_enum.value if device_class_enum else None,
                     }
                     discovered_sensor_count += 1
 
