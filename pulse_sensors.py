@@ -7,7 +7,7 @@ from pydantic import ValidationError
 import hassapi as hass
 import mqttapi as mqtt
 
-from pulse_models import HubDetails, LatestSensorData
+from pulse_models import HubDetails, LatestSensorData, DeviceClass
 
 __version__ = '0.1.0'
 
@@ -218,6 +218,7 @@ class PulseSensors(hass.Hass, mqtt.Mqtt):
                         "unique_id": comp_unique_id,
                         "unit_of_measurement": measurement.MeasuringUnit,
                         "value_template": f"{{{{ value_json.{param_name} }}}}",
+                        "device_class": DeviceClass.from_param_name(measurement.ParamName),
                     }
                     discovered_sensor_count += 1
 

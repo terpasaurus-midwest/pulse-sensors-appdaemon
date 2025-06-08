@@ -1,5 +1,5 @@
 from datetime import datetime
-from enum import IntEnum
+from enum import IntEnum, Enum
 from typing import Optional, List
 
 from pydantic import BaseModel, Field
@@ -215,3 +215,20 @@ class HubDetails(BaseModel):
     macAddress: str
     growId: int
     sensorDevices: List[SensorDevice]
+
+
+class DeviceClass(Enum):
+    HUMIDITY = "humidity"
+    TEMPERATURE = "temperature"
+    MOISTURE = "moisture"
+    PRESSURE = "pressure"  # Used for VPD, for now
+
+    @classmethod
+    def from_param_name(cls, param_name: str) -> Optional["DeviceClass"]:
+        mapping = {
+            "Humidity": cls.HUMIDITY,
+            "Temperature": cls.TEMPERATURE,
+            "Water Content": cls.MOISTURE,
+            "VPD": cls.PRESSURE,
+        }
+        return mapping.get(param_name)
