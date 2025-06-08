@@ -188,7 +188,37 @@ class PulseSensors(hass.Hass):
                 continue
 
             discovered_hubs.append(hub.model_dump())
-            discovered_sensor_count += len(hub.sensorDevices)
+
+            for device in hub.sensorDevices:
+                latest = self.get_sensor_latest_data(device.id)
+                if latest is None:
+                    continue
+
+                for measurement in latest.dataPointDto.dataPointValues:
+                    param_name = measurement.ParamName.replace(" ", "_").lower()
+                    unique_id = f"{device.id}_{param_name}"
+                    state_topic = f"pulse/{device.id}/{param_name}"
+                    config_topic = f"homeassistant/sensor/{device.id}_{param_name}/config"
+
+                    payload = {
+                        "name": f"{latest.name} {measurement.ParamName}",
+                        "unique_id": unique_id,
+                        "state_topic": state_topic,
+                        "unit_of_measurement": measurement.MeasuringUnit,
+                        "device": {
+                            "identifiers": [str(hub.id)],
+                            "name": hub.name,
+                            "model": "Pulse Hub",
+                            "manufacturer": "Pulse Grow",
+                        },
+                    }
+
+                    self.mqtt_publish(
+                        topic=config_topic,
+                        payload=json.dumps(payload),
+                        retain=True,
+                    )
+                    discovered_sensor_count += 1
 
         self.set_state(
             "sensor.pulse_discovered_hubs",
@@ -219,9 +249,17 @@ class PulseSensors(hass.Hass):
                     param_name = measurement.ParamName.replace(" ", "_").lower()
                     sensor_type_name = sensor.sensorType.name.replace(" ", "_").lower()
                     entity_id = f"sensor.pulse_{hub['id']}_{device['id']}_{sensor_type_name}_{param_name}"
+                    state_topic = f"pulse/{device['id']}/{param_name}"
 
                     self.logger.info(
                         f"🔄 Updating sensor entity: {device['id']} {sensor_type_name} {param_name}")
+
+                    self.mqtt_publish(
+                        topic=state_topic,
+                        payload=str(measurement.ParamValue),
+                        retain=True,
+                    )
+
                     self.set_state(entity_id, state=measurement.ParamValue, attributes={
                         "hub_id": hub["id"],
                         "unit_of_measurement": measurement.MeasuringUnit,
