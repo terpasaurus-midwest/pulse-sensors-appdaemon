@@ -62,6 +62,10 @@ class PulseSensors(hass.Hass, mqtt.Mqtt):
         self.listen_state(self.update_intervals, "input_number.sensor_update_interval")
         self.listen_state(self.update_intervals, "input_number.sensor_discovery_interval")
 
+        # The first time, we need to bootstrap the discovery, otheriwse we'll wait
+        # `discover_interval` for the first one, which is annoying.
+        self.discover_hub_sensors()
+
     def update_intervals(self, entity, attribute, old, new, **kwargs):
         """Reconfigure intervals when input_number changes."""
         new_interval = int(float(new))
