@@ -20,7 +20,7 @@ MQTT_ORIGIN_INFO = {
     "name": "Pulse Sensors AppDaemon",
     "sw": str(__version__),
     "url": "https://github.com/terpasaurus-midwest/pulse-sensors-appdaemon",
-},
+}
 
 
 class PulseSensors(hass.Hass, mqtt.Mqtt):
