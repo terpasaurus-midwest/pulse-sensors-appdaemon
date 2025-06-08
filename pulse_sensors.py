@@ -200,16 +200,14 @@ class PulseSensors(hass.Hass):
 
     def update_sensor_states(self, **kwargs):
         """Update state for all discovered sensors, creating new entities if needed."""
-        discovered_hubs_state = self.get_state(
+        discovered_hubs = self.get_state(
             "sensor.pulse_discovered_hubs",
-            attribute="b64_data",  # type: ignore
+            attribute="hubs",
         )
 
-        if not discovered_hubs_state:
+        if not discovered_hubs:
             self.logger.warning("⚠️ No sensors discovered yet, skipping update.")
             return
-
-        discovered_hubs = json.loads(base64.b64decode(str(discovered_hubs_state)).decode())
         for hub in discovered_hubs:
             for device in hub["sensorDevices"]:
                 sensor = self.get_sensor_latest_data(device["id"])
