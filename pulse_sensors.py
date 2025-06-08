@@ -1,10 +1,10 @@
 from typing import Any, List, Optional, Union
-import base64
 import json
 import requests
 
 from pydantic import ValidationError
 import hassapi as hass
+import mqttapi as mqtt
 
 from pulse_models import HubDetails, LatestSensorData
 
@@ -15,7 +15,7 @@ SENSOR_UPDATE_INTERVAL = 60.0  # 1 minutes
 SENSOR_DISCOVERY_INTERVAL = 3600.0  # 1 hour
 
 
-class PulseSensors(hass.Hass):
+class PulseSensors(hass.Hass, mqtt.Mqtt):
     def initialize(self):
         """Initialize periodic updates and set up API session."""
         self.logger = self.get_user_log("pulse_sensors")
@@ -200,11 +200,10 @@ class PulseSensors(hass.Hass):
                     )
                     discovered_sensor_count += 1
 
-        hub_data_b64 = base64.b64encode(json.dumps(discovered_hubs).encode()).decode()
         self.set_state(
             "sensor.pulse_discovered_hubs",
             state=len(discovered_hubs),
-            attributes={"b64_data": hub_data_b64}
+            attributes={"hubs": discovered_hubs}
         )
         self.set_state("sensor.pulse_discovered_sensors", state=discovered_sensor_count)
         self.logger.info(f"✅ Discovered {discovered_sensor_count} sensors across {len(discovered_hubs)} hubs.")
