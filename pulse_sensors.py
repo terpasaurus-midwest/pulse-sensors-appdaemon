@@ -58,12 +58,12 @@ class PulseSensors(hass.Hass):
         """Reconfigure intervals when input_number changes."""
         new_interval = int(float(new))
 
-        if entity == "input_number.pulse_update_interval":
+        if entity == "input_number.sensor_update_interval":
             self.cancel_timer(self.sensor_update_job_uuid)
             self.sensor_update_job_uuid = self.run_every(self.update_sensor_states, "now", new_interval)
             self.logger.info(f"📝️ Updated sensor state update interval to {new_interval} sec")
 
-        elif entity == "input_number.pulse_discover_interval":
+        elif entity == "input_number.sensor_discovery_interval":
             self.cancel_timer(self.sensor_discover_job_uuid)
             self.sensor_discover_job_uuid = self.run_every(self.discover_hub_sensors, "now", new_interval)
             self.logger.info(f"📝️ Updated hub sensor discovery interval to {new_interval} sec")
