@@ -7,10 +7,10 @@ authors = [
     {name = "Terpasaurus Midwest",email = "terpasaurus-midwest@protonmail.com"}
 ]
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.13"
 dependencies = [
-    "hassapi (==0.2.1)",
-    "pydantic (>=2.10.6,<3.0.0)"
+    "pydantic (>=2.10.6,<3.0.0)",
+    "appdaemon (>=4.5.10,<5.0.0)"
 ]
 
 [build-system]

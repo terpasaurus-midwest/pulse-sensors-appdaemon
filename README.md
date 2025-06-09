@@ -21,7 +21,7 @@ updates** Home Assistant sensor entities for them on the fly—no manual configu
 - **Auto-discovers Pulse Hubs** using the API  
 - **Creates & Updates** Home Assistant sensor entities **dynamically**  
 - **Polls most recent data** at a configurable interval
-- **Publishes MQTT discovery & states** on `pulse/<device_id>/<param_name>` topics
+- **Publishes MQTT discovery & states** on `pulseapp/<device_unique_id>/<param_name>` topics
 - **Supports a wide range of sensor types**
 - **Allows Home Assistant automations** to act on sensor readings
 - **Supports recording the state updates using the Home Assistant Recorder addon
