@@ -197,6 +197,14 @@ class PulseSensors(hass.Hass, mqtt.Mqtt):
                     "cns": [
                         ["mac", hub_mac_address]
                     ],
+                    "cmps": {
+                        f"{hub_unique_id}_void": {
+                            "p": "binary_sensor",
+                            "name": f"{hub.name} {hub.id}",
+                            "unique_id": hub_unique_id,
+                            "stat_t": f"pulse/{hub_unique_id}/state",
+                        }
+                    }
                 }
             }
             hub_config_topic = f"homeassistant/device/{hub_unique_id}/config"
