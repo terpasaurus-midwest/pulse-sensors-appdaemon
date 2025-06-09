@@ -5,7 +5,6 @@ import textwrap
 
 from pydantic import ValidationError
 import hassapi as hass
-import mqttapi as mqtt
 
 from pulse_models import HubDetails, LatestSensorData, DeviceClass
 
@@ -23,7 +22,7 @@ MQTT_ORIGIN_INFO = {
 }
 
 
-class PulseSensors(hass.Hass, mqtt.Mqtt):
+class PulseSensors(hass.Hass):
     def initialize(self):
         """Initialize periodic updates and set up API session."""
         self.logger = self.get_user_log("pulse_sensors")
@@ -37,6 +36,10 @@ class PulseSensors(hass.Hass, mqtt.Mqtt):
         self._session = requests.Session()
         self._session.headers.update({"x-api-key": self.api_key})
         self.logger.info("🔗 Created persistent Pulse API session.")
+
+        # Mqtt is provided by a separate API. We can use it as a mixin in this class.
+        # But the docs suggest instantiating API objects for what plugins one needs.
+        self._queue_plugin = self.get_plugin_api("MQTT")
 
         # Read update intervals from Home Assistant inputs
         update_interval = int(float(
@@ -62,9 +65,22 @@ class PulseSensors(hass.Hass, mqtt.Mqtt):
         self.listen_state(self.update_intervals, "input_number.sensor_update_interval")
         self.listen_state(self.update_intervals, "input_number.sensor_discovery_interval")
 
+        # Listener to clear legacy/ghost entities of ours
+        self.listen_event(self.clear_old_pulse, "state_changed", entity_id="input_button.clear_old_pulse")
+
         # The first time, we need to bootstrap the discovery, otherwse we'll wait
         # `discover_interval` for the first one, which is annoying.
         self.discover_hub_sensors()
+
+    def clear_old_pulse(self, event_type: str, data: dict[str, Any], **kwargs: Any) -> None:
+        """Clear button listener, wipes all entities matching a glob like pulse_* or pulseapp_*."""
+        self.logger.info("☎️ Callback for 'clear_old_pulse' event listener...")
+        global_state = self.get_state()
+
+        for entity in global_state:
+            if entity.startswith("sensor.pulse_") or entity.startswith("sensor.pulseapp_"):
+                self.set_state(entity, state="", attributes={})
+                self.logger.info(f"🧹 Cleared state for {entity}")
 
     def update_intervals(self, entity, attribute, old, new, **kwargs):
         """Reconfigure intervals when input_number changes."""
@@ -202,15 +218,15 @@ class PulseSensors(hass.Hass, mqtt.Mqtt):
                             "p": "binary_sensor",
                             "name": f"{hub.name} {hub.id}",
                             "unique_id": hub_unique_id,
-                            "stat_t": f"pulse/{hub_unique_id}/state",
+                            "stat_t": f"pulseapp/{hub_unique_id}/state",
                         }
                     }
                 }
             }
             hub_config_topic = f"homeassistant/device/{hub_unique_id}/config"
 
-            self.logger.info(f"🔍 Discovery: Publishing discovery message for hub {hub_id}@{hub_config_topic}...")
-            self.mqtt_publish(
+            self.logger.info(f"🔍 Discovery: Publishing discovery message for hub {hub_id}: {hub_config_topic}")
+            self._queue_plugin.mqtt_publish(
                 topic=hub_config_topic,
                 payload=json.dumps(hub_payload),
                 retain=True,
@@ -245,10 +261,11 @@ class PulseSensors(hass.Hass, mqtt.Mqtt):
                         "unit_of_measurement": measurement.MeasuringUnit,
                         "value_template": f"{{{{ value_json.{param_name} }}}}",
                         "device_class": device_class_enum.value if device_class_enum else None,
+                        "stat_t": f"pulseapp/{device_unique_id}/{param_name}",
                     }
                     discovered_sensor_count += 1
 
-                self.logger.info(f"🔍 Discovery: generating MQTT payload for device {device_unique_id}...")
+                self.logger.info(f"🔍 Discovery: generating MQTT payload for device {device_unique_id}")
                 device_payload = {
                     "o": MQTT_ORIGIN_INFO,
                     "dev": {
@@ -260,12 +277,12 @@ class PulseSensors(hass.Hass, mqtt.Mqtt):
                         "via_device": hub_unique_id,
                     },
                     "cmps": components,
-                    "stat_t": f"pulse/{device.id}/state",
+                    "stat_t": f"pulseapp/{device_unique_id}/state",
                 }
                 device_config_topic = f"homeassistant/device/{device_unique_id}/config"
 
-                self.logger.info(f"🔍 Discovery: Publishing discovery message for device {device_unique_id}@{device_config_topic}...")
-                self.mqtt_publish(
+                self.logger.info(f"🔍 Discovery: publishing discovery message for {device_unique_id}: {device_config_topic}")
+                self._queue_plugin.mqtt_publish(
                     topic=device_config_topic,
                     payload=json.dumps(device_payload),
                     retain=True,
@@ -289,10 +306,10 @@ class PulseSensors(hass.Hass, mqtt.Mqtt):
         if not discovered_hubs:
             self.logger.warning("⚠️ No sensors discovered yet, skipping update.")
             return
+
         for hub in discovered_hubs:
             for device in hub["sensorDevices"]:
                 sensor = self.get_sensor_latest_data(device["id"])
-
                 if sensor is None:
                     continue
 
@@ -300,21 +317,10 @@ class PulseSensors(hass.Hass, mqtt.Mqtt):
                 device_unique_id = f"pulseapp_{sensor_type_name}_{device['id']}"
                 for measurement in sensor.dataPointDto.dataPointValues:
                     param_name = measurement.ParamName.replace(" ", "_").lower()
-                    entity_id = f"sensor.{device_unique_id}_{param_name}"
-
-                    self.logger.info(f"🔄 Updating sensor entity: {entity_id}")
-
-                    self.set_state(
-                        entity_id,
-                        state=measurement.ParamValue,
-                        attributes={
-                            "hub_id": hub["id"],
-                            "unit_of_measurement": measurement.MeasuringUnit,
-                            "parameter_name": f"{measurement.ParamName}",
-                            "sensor_name": sensor.name,
-                            "sensor_id": device["id"],
-                            "sensor_type": sensor.sensorType,
-                            "sensor_type_name": sensor.sensorType.name,
-                            "measured_at": sensor.dataPointDto.createdAt.isoformat(),
-                        },
+                    state_topic = f"pulseapp/{device_unique_id}/{param_name}"
+                    self.logger.info(f"🔄 Publishing state update to topic: {state_topic}")
+                    self._queue_plugin.mqtt_publish(
+                        topic=state_topic,
+                        payload=str(measurement.ParamValue),
+                        retain=True,
                     )
