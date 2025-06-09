@@ -41,9 +41,10 @@ class PulseSensors(ad.ADBase):
 
     def initialize(self):
         """Initialize periodic updates and set up API session."""
-        self._adapi = self.get_ad_api()
-        self._hass = self.get_plugin_api("HASS")
-        self._queue = self.get_plugin_api("MQTT")
+        # Load all the plugins we need.
+        self._adapi: ADAPI = self.get_ad_api()
+        self._hass: Hass = self.get_plugin_api("HASS")
+        self._queue: Mqtt = self.get_plugin_api("MQTT")
 
         if not self._hass or not self._queue:
             raise RuntimeError("❌ Required plugin(s) missing: HASS or MQTT")
@@ -91,21 +92,8 @@ class PulseSensors(ad.ADBase):
         self._hass.listen_state(self.update_intervals, "input_number.sensor_update_interval")
         self._hass.listen_state(self.update_intervals, "input_number.sensor_discovery_interval")
 
-        # Listener to clear legacy/ghost entities of ours when the button is pressed
-        self._hass.listen_state(self.clear_old_pulse, "input_button.clear_old_pulse")
-
         # Kick off discovery shortly after we start, so the user doesn't wait an hour
         self._adapi.run_in(self.discover_hub_sensors, 10)
-
-    def clear_old_pulse(self, entity, attribute, old, new, **kwargs) -> None:
-        """Clear button listener, wipes all entities created by this integration."""
-        self.logger.info("☎️ Callback for 'clear_old_pulse' button state listener...")
-        global_state = self._hass.get_state()
-
-        for entity in global_state:
-            if entity.startswith("sensor.pulse_") or entity.startswith("sensor.pulseapp_"):
-                self._hass.set_state(entity, state="", attributes={})
-                self.logger.info(f"🧹 Cleared state for {entity}")
 
     def update_intervals(self, entity, attribute, old, new, **kwargs):
         """Reconfigure intervals when input_number changes."""
