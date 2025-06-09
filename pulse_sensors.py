@@ -220,7 +220,7 @@ class PulseSensors(hass.Hass, mqtt.Mqtt):
                 if latest is None:
                     continue
 
-                sensor_type_name = latest.sensorType.name.replace(" ", "_").lower()
+                sensor_type_name = latest.sensorType.name.lower()
                 device_unique_id = f"pulse_{sensor_type_name}_{device.id}"
 
                 self.logger.info(f"🔍 Discovery: found device {device_unique_id}, processing its components")
@@ -233,6 +233,7 @@ class PulseSensors(hass.Hass, mqtt.Mqtt):
                         "p": "sensor",
                         "name": f"{measurement.ParamName}",
                         "unique_id": comp_unique_id,
+                        "object_id": comp_unique_id,
                         "unit_of_measurement": measurement.MeasuringUnit,
                         "value_template": f"{{{{ value_json.{param_name} }}}}",
                         "device_class": device_class_enum.value if device_class_enum else None,
