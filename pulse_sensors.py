@@ -62,7 +62,7 @@ class PulseSensors(hass.Hass, mqtt.Mqtt):
         self.listen_state(self.update_intervals, "input_number.sensor_update_interval")
         self.listen_state(self.update_intervals, "input_number.sensor_discovery_interval")
 
-        # The first time, we need to bootstrap the discovery, otheriwse we'll wait
+        # The first time, we need to bootstrap the discovery, otherwse we'll wait
         # `discover_interval` for the first one, which is annoying.
         self.discover_hub_sensors()
 
@@ -185,7 +185,7 @@ class PulseSensors(hass.Hass, mqtt.Mqtt):
 
             # The hub mac doesn't use colons, so convert it to a string that does
             hub_mac_address = ":".join(textwrap.wrap(hub.macAddress, 2))
-            hub_unique_id = f"pulse_hub_{hub.id}"
+            hub_unique_id = f"pulseapp_hub_{hub.id}"
             hub_payload = {
                 "o": MQTT_ORIGIN_INFO,
                 "dev": {
@@ -221,7 +221,7 @@ class PulseSensors(hass.Hass, mqtt.Mqtt):
                     continue
 
                 sensor_type_name = latest.sensorType.name.lower()
-                device_unique_id = f"pulse_{sensor_type_name}_{device.id}"
+                device_unique_id = f"pulseapp_{sensor_type_name}_{device.id}"
 
                 self.logger.info(f"🔍 Discovery: found device {device_unique_id}, processing its components")
                 components: dict[str, dict[str, Any]] = {}
@@ -264,17 +264,17 @@ class PulseSensors(hass.Hass, mqtt.Mqtt):
                 )
 
         self.set_state(
-            "sensor.pulse_discovered_hubs",
+            "sensor.pulseapp_discovered_hubs",
             state=len(discovered_hubs),
             attributes={"hubs": discovered_hubs}
         )
-        self.set_state("sensor.pulse_discovered_sensors", state=discovered_sensor_count)
+        self.set_state("sensor.pulseapp_discovered_sensors", state=discovered_sensor_count)
         self.logger.info(f"✅ Discovered {discovered_sensor_count} sensors across {len(discovered_hubs)} hubs.")
 
     def update_sensor_states(self, **kwargs):
         """Update state for all discovered sensors, creating new entities if needed."""
         discovered_hubs = self.get_state(
-            "sensor.pulse_discovered_hubs",
+            "sensor.pulseapp_discovered_hubs",
             attribute="hubs",
         )
 
@@ -289,7 +289,7 @@ class PulseSensors(hass.Hass, mqtt.Mqtt):
                     continue
 
                 sensor_type_name = sensor.sensorType.name.replace(" ", "_").lower()
-                device_unique_id = f"pulse_{sensor_type_name}_{device['id']}"
+                device_unique_id = f"pulseapp_{sensor_type_name}_{device['id']}"
                 for measurement in sensor.dataPointDto.dataPointValues:
                     param_name = measurement.ParamName.replace(" ", "_").lower()
                     entity_id = f"sensor.{device_unique_id}_{param_name}"
