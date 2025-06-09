@@ -1,58 +1,85 @@
 # Pulse Sensors AppDaemon Integration
 
-Welcome to the **Pulse Sensors AppDaemon Integration** project! This repository provides an **AppDaemon app**
-for integrating **Pulse Grow cultivation sensors** with **Home Assistant**, allowing cultivators to expose their
-Pulse Grow sensor data in Home Assistant as sensor entities.
+This AppDaemon app integrates Pulse Labs sensor data into Home Assistant via MQTT. It uses the Pulse Grow API to discover your hubs and their connected devices, then publishes MQTT discovery and state messages so Home Assistant can treat them as native devices.
 
-## Overview
+## What It Does
 
-This integration **automatically discovers** all **Pulse Hubs** for a given Pulse Grow location. It dynamically
-retrieves available sensors and their measurements from each discovered device and **automatically creates and
-updates** Home Assistant sensor entities for them on the fly—no manual configuration needed.
+- Discovers all Pulse Hubs and connected sensors using Pulse Labs’ REST API.
+- Publishes MQTT discovery messages so hubs and sensors show up in Home Assistant's device registry.
+- Updates sensor readings every minute by default, pushing live telemetry to Home Assistant via MQTT.
+- Sensors work seamlessly with Home Assistant features like generic thermostats, hygrostats, and automation helpers.
+- Makes Pulse data accessible to any MQTT-capable client—not just Home Assistant.
 
-## Prerequisites
+## Why This Helps
 
-- **[Home Assistant](https://www.home-assistant.io/getting-started/)**: I run Home Assistant OS in a standard Pi 5 container deployment.
-- **[AppDaemon](https://community.home-assistant.io/t/home-assistant-community-add-on-appdaemon-4/163259)**: Installed via the AppDaemon 4 add-on.
-- **[Pulse Grow API Access](https://api.pulsegrow.com/docs/index.html)**: API key required.
-- **[Pulse Sensors](https://pulsegrow.com/collections/everything-hub)**: A Pulse Hub and at least 1 connected sensor.
+Pulse Labs doesn’t support MQTT or Home Assistant natively, which limits local automation. This app bridges that
+gap—once installed, you can:
 
-## What This Integration Does
-- **Auto-discovers Pulse Hubs** using the API  
-- **Creates & Updates** Home Assistant sensor entities **dynamically**  
-- **Polls most recent data** at a configurable interval
-- **Publishes MQTT discovery & states** on `pulseapp/<device_unique_id>/<param_name>` topics
-- **Supports a wide range of sensor types**
-- **Allows Home Assistant automations** to act on sensor readings
-- **Supports recording the state updates using the Home Assistant Recorder addon
+- View Pulse sensor data in Home Assistant dashboards, configurable like native devices.
+- Use grow tent temp/humidity sensors to control HVAC via HA automations.
+- Feed substrate EC and VWC into irrigation scheduling logic.
+- Log all readings in HA Recorder or external tools.
+- Pipe real-time data to any local MQTT consumer (other apps, dashboards, logging).
 
-## Currently Supported Devices & Sensors
-- Pulse Hub & all connected sensors  
-- Standalone Pulse Devices (e.g., Pulse One, Pulse Pro) *(Planned Support)*  
-- **Substrate Sensors**: Volumetric Water Content (VWC) %, Bulk Electrical Conductivity (EC), Pore Water EC, Temperature
-- **Environmental Sensors**: Photosynthetic Photon Flux Density (PPFD), Luminous flux density (Lux), Temperature, Relative Humidity, VPD, Dew Point, CO2 PPM 
-- **Hydroponic Sensors**: pH, EC, Dissolved Oxygen (DO), Oxidation-Reduction Potential (ORP)
+## Screenshots
 
-All possible Pulse Hub datapoints should be supported. 
+With this integration, sensors like Pulse's VWC show up in Home Assistant under their respective hubs, with all
+connected measurement values (e.g., VWC, Bulk EC, Pore Water EC, Temp) exposed as individual entities. From there, 
+they behave like any other MQTT-native sensor in HA.
 
-⚠️ **Note**: This integration does **not** provide built-in alerting—Home Assistant has addons to handle those separately.
+![Example Device Info Screenshot](/assets/device_info_vwc.png)  
+*Example of a registered Acclima TDR-310W device showing its data in Home Assistant.*
 
-## Historical Data & Analytics
+![Example Device List Screenshot](/assets/device_list.png)  
+*The device list showing THV, VWC, and Hub devices.*
 
-The main objective of this integration is making current Pulse Hub sensor data available to your Home Assistant
-setup, for allowing more complex orchestration and automation to take place in near real-time. Allowing one to take
-external actions based on current sensor readings that would otherwise be siloed in the cloud.
+## How It Works
 
-Home Assistant (and Recorder) is ill-suited as a big-data analytics platform for loading historical data. This
-integration is designed to be generic for scalability. The focus is on current data, not loading historical
-time-series from Pulse Hub.
+This app uses two scheduled jobs:
 
-## Mock API Responses
-Sample API responses are saved under `mock_responses/`. These were captured by calling the Pulse API endpoints used by
-the app. The folder currently contains:
+### Sensor Discovery (`discover_hub_sensors`)
 
-- `hubs_ids.json` – response from `GET /hubs/ids`
-- `hub_${PULSE_HUB_ID}.json` – response from `GET /hubs/{hubId}` using the example hub ID
-- `sensor_recent_data_${PULSE_THV_ID}.json` – response from `GET /sensors/{sensor_id}/recent-data` for the THV sensor
-- `sensor_recent_data_${PULSE_VWC_ID}.json` – response from `GET /sensors/{sensor_id}/recent-data` for the VWC sensor
-- `unauthorized_operation.json` - response when making an unprivileged call to an endpoint requiring authentication
+- Runs hourly (or on a custom interval).
+- Calls the Pulse API to list hubs and attached devices.
+- Builds MQTT discovery payloads using the device registry format.
+- Publishes one config topic per hub and sensor device to the `homeassistant` discovery prefix like:
+  `homeassistant/device/pulseapp_vwc1_1234/config`
+
+### Sensor State Updates (`update_sensor_states`)
+
+- Runs every minute (or on a custom interval).
+- Queries the latest data from each sensor.
+- Publishes readings to state topics like:
+  `pulseapp/pulseapp_vwc1_1234/pore_water_ec`
+
+## Requirements
+
+- Home Assistant with:
+  - [MQTT integration](https://www.home-assistant.io/integrations/mqtt/) enabled
+  - [AppDaemon](https://appdaemon.readthedocs.io/) installed
+- Pulse Grow API key saved to an `input_text.pulse_api_key` entity
+- At least one Pulse Hub with attached sensors
+- MQTT broker (typically Mosquitto) connected to both Home Assistant and AppDaemon
+
+## Configuration
+
+You configure update/discovery intervals using two `input_number` entities:
+
+- `input_number.sensor_update_interval` (default: 60s)
+- `input_number.sensor_discovery_interval` (default: 3600s)
+
+These values can be adjusted live in the UI, and the app will reconfigure itself automatically.
+
+As mentioned earlier, you need an `input_text.pulse_api_key` entity with your Pulse API key saved.
+
+## Known Limitations
+
+- Only a single Pulse Grow location is supported for now.
+  - If you have a Professional subscription to Pulse and want to support multiple grows, contact me.
+- No historical data import—this is a live sync integration, not an analytics backend.
+- No alerting—it’s expected that Home Assistant’s automations or notification integrations handle that.
+
+## Disclaimer
+
+This project and I are **not affiliated with, endorsed by, or in any way officially connected to Pulse Labs, Inc.** All
+product names, logos, and brands are the property of their respective owners.
