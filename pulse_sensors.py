@@ -266,12 +266,17 @@ class PulseSensors(ad.ADBase):
             for device in hub.sensorDevices:
                 latest = self.get_sensor_latest_data(device.id)
                 if latest is None:
+                    self.logger.warning(f"🔍 Discovery: no data received for device {device.id}, skipping.")
                     continue
 
+                # Derive a unique ID for the device, to generate a suitable discovery config topic
+                # This unique device ID also forms the basis for each sensor component's unique ID.
                 sensor_type_name = latest.sensorType.name.lower()
                 device_unique_id = f"pulseapp_{sensor_type_name}_{device.id}"
-
+                device_config_topic = f"homeassistant/device/{device_unique_id}/config"
                 self.logger.info(f"🔍 Discovery: found device {device_unique_id}, processing its components")
+
+                # Generate a component config for each connected sensor of this device.
                 components: dict[str, dict[str, Any]] = {}
                 for measurement in latest.dataPointDto.dataPointValues:
                     param_name = measurement.ParamName.replace(" ", "_").lower()
@@ -284,10 +289,12 @@ class PulseSensors(ad.ADBase):
                         "object_id": comp_unique_id,
                         "unit_of_measurement": measurement.MeasuringUnit,
                         "device_class": device_class_enum.value if device_class_enum else None,
-                        "stat_t": f"pulseapp/{device_unique_id}/{param_name}",
+                        "stat_t": f"pulseapp/{device_unique_id}/state",
+                        "value_template": f"{{{{ value_json.{param_name} }}}}"
                     }
                     discovered_sensor_count += 1
 
+                # Build the final device discovery message, including sensor components from earlier
                 self.logger.info(f"🔍 Discovery: generating MQTT payload for device {device_unique_id}")
                 device_payload = {
                     "o": MQTT_ORIGIN_INFO,
@@ -301,7 +308,6 @@ class PulseSensors(ad.ADBase):
                     },
                     "cmps": components,
                 }
-                device_config_topic = f"homeassistant/device/{device_unique_id}/config"
 
                 self.logger.info(f"🔍 Discovery: publishing discovery message for {device_unique_id}: {device_config_topic}")
                 self._queue.mqtt_publish(
@@ -319,7 +325,7 @@ class PulseSensors(ad.ADBase):
         self.logger.info(f"✅ Discovered {discovered_sensor_count} sensors across {len(discovered_hubs)} hubs.")
 
     def update_sensor_states(self, **kwargs):
-        """Update state for all discovered sensors, creating new entities if needed."""
+        """Get the latest data points for every connected sensor and publish them to MQTT."""
         discovered_hubs = self._hass.get_state(
             "sensor.pulseapp_discovered_hubs",
             attribute="hubs",
@@ -341,14 +347,22 @@ class PulseSensors(ad.ADBase):
                 if sensor is None:
                     continue
 
-                sensor_type_name = sensor.sensorType.name.replace(" ", "_").lower()
-                device_unique_id = f"pulseapp_{sensor_type_name}_{device['id']}"
+                # Bundle each sensor measurement for this device into a cute payload.
+                # This way we can publish all data points in one message.
+                device_state_payload = {}
                 for measurement in sensor.dataPointDto.dataPointValues:
                     param_name = measurement.ParamName.replace(" ", "_").lower()
-                    state_topic = f"pulseapp/{device_unique_id}/{param_name}"
-                    self.logger.info(f"🔄 Publishing state update to topic: {state_topic}")
-                    self._queue.mqtt_publish(
-                        topic=state_topic,
-                        payload=str(measurement.ParamValue),
-                        retain=True,
-                    )
+                    device_state_payload[param_name] = measurement.ParamValue
+
+                # We should have a payload now, like: {"temperature": 21.4, "dew_point" 15.2}
+                # Now, figure out the state topic for this device, to publish the message.
+                sensor_type_name = sensor.sensorType.name.replace(" ", "_").lower()
+                device_unique_id = f"pulseapp_{sensor_type_name}_{device['id']}"
+                state_topic = f"pulseapp/{device_unique_id}/state"
+
+                self.logger.info(f"🔄 Publishing state update to topic: {state_topic}")
+                self._queue.mqtt_publish(
+                    topic=state_topic,
+                    payload=json.dumps(device_state_payload),
+                    retain=True,
+                )
