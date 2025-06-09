@@ -293,8 +293,7 @@ class PulseSensors(hass.Hass, mqtt.Mqtt):
                     param_name = measurement.ParamName.replace(" ", "_").lower()
                     entity_id = f"sensor.{device_unique_id}_{param_name}"
 
-                    self.logger.info(
-                        f"🔄 Updating sensor entity: {device['id']} {sensor_type_name} {param_name}")
+                    self.logger.info(f"🔄 Updating sensor entity: {entity_id}")
 
                     self.set_state(
                         entity_id,
