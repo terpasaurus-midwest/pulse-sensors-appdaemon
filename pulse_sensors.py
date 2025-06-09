@@ -40,6 +40,9 @@ class PulseSensors(hass.Hass):
         # Mqtt is provided by a separate API. We can use it as a mixin in this class.
         # But the docs suggest instantiating API objects for what plugins one needs.
         self._queue_plugin = self.get_plugin_api("MQTT")
+        if not self._queue_plugin:
+            self.logger.error("🛑 MQTT plugin not loaded! Sensor updates disabled.")
+            return
 
         # Read update intervals from Home Assistant inputs
         update_interval = int(float(
@@ -218,7 +221,6 @@ class PulseSensors(hass.Hass):
                             "p": "binary_sensor",
                             "name": f"{hub.name} {hub.id}",
                             "unique_id": hub_unique_id,
-                            "stat_t": f"pulseapp/{hub_unique_id}/state",
                         }
                     }
                 }
@@ -259,7 +261,6 @@ class PulseSensors(hass.Hass):
                         "unique_id": comp_unique_id,
                         "object_id": comp_unique_id,
                         "unit_of_measurement": measurement.MeasuringUnit,
-                        "value_template": f"{{{{ value_json.{param_name} }}}}",
                         "device_class": device_class_enum.value if device_class_enum else None,
                         "stat_t": f"pulseapp/{device_unique_id}/{param_name}",
                     }
@@ -277,7 +278,6 @@ class PulseSensors(hass.Hass):
                         "via_device": hub_unique_id,
                     },
                     "cmps": components,
-                    "stat_t": f"pulseapp/{device_unique_id}/state",
                 }
                 device_config_topic = f"homeassistant/device/{device_unique_id}/config"
 
