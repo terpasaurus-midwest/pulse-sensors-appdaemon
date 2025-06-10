@@ -1,3 +1,4 @@
+import collections
 from typing import Any, List, Optional, Union
 import json
 import requests
@@ -231,6 +232,7 @@ class PulseApp(ad.ADBase):
         discovered_sensor_count = 0
         discovered_hubs = []
 
+        # TODO: Play extract-the-method: "_process_and_publish_hubs"
         for hub_id in hub_ids:
             hub = self.get_hub_details(hub_id)
             if hub is None:
@@ -285,6 +287,7 @@ class PulseApp(ad.ADBase):
                     f"🔍 Discovery: no devices found connected to this hub: {hub_id} "
                 )
 
+            # TODO: Extract method: "_process_and_publish_devices"
             for device in hub.sensorDevices:
                 latest = self.get_sensor_latest_data(device.id)
                 if latest is None:
@@ -302,6 +305,7 @@ class PulseApp(ad.ADBase):
                     f"🔍 Discovery: found device {device_unique_id}, processing its components"
                 )
 
+                # TODO: Extract method: "_process_device_components"
                 # Generate a component config for each connected sensor of this device.
                 components: dict[str, dict[str, Any]] = {}
                 for measurement in latest.dataPointDto.dataPointValues:
@@ -363,8 +367,8 @@ class PulseApp(ad.ADBase):
         )
 
     def update_sensor_states(self, **kwargs):
-        """Get the latest data points for every connected sensor and publish them to MQTT."""
-        discovered_hubs = self._hass.get_state(
+        """Publish the latest data points for each connected hub and sensor device."""
+        discovered_hubs: dict[dict, Any] = self._hass.get_state(
             "sensor.pulseapp_discovered_hubs",
             attribute="hubs",
         )
@@ -374,33 +378,44 @@ class PulseApp(ad.ADBase):
             return
 
         for hub in discovered_hubs:
-            hub_unique_id = f"pulseapp_hub_{hub['id']}"
-            self._queue.mqtt_publish(
-                topic=f"pulseapp/{hub_unique_id}/state",
-                payload="ON",
-                retain=True,
-            )
+            # Ensure this hub's fake binary sensor component is marked as ``ON``
+            self._publish_hub_state(hub)
+
+            # Get and publish the latest readings for each connected sensor device
             for device in hub["sensorDevices"]:
-                sensor = self.get_sensor_latest_data(device["id"])
-                if sensor is None:
+                device_data = self.get_sensor_latest_data(device["id"])
+                if device_data is None:
                     continue
 
-                # Bundle each sensor measurement for this device into a cute payload.
-                # This way we can publish all data points in one message.
-                device_state_payload = {}
-                for measurement in sensor.dataPointDto.dataPointValues:
-                    param_name = measurement.ParamName.replace(" ", "_").lower()
-                    device_state_payload[param_name] = measurement.ParamValue
+                self._publish_device_state(device["id"], device_data)
 
-                # We should have a payload now, like: {"temperature": 21.4, "dew_point" 15.2}
-                # Now, figure out the state topic for this device, to publish the message.
-                sensor_type_name = sensor.sensorType.name.replace(" ", "_").lower()
-                device_unique_id = f"pulseapp_{sensor_type_name}_{device['id']}"
-                state_topic = f"pulseapp/{device_unique_id}/state"
+    def _publish_hub_state(self, hub: dict[str, Any]) -> None:
+        """Publish the hub state and update all attached devices."""
+        hub_unique_id = f"pulseapp_hub_{hub['id']}"
+        self._queue.mqtt_publish(
+            topic=f"pulseapp/{hub_unique_id}/state",
+            payload="ON",
+            retain=True,
+        )
 
-                self.logger.info(f"🔄 Publishing state update to topic: {state_topic}")
-                self._queue.mqtt_publish(
-                    topic=state_topic,
-                    payload=json.dumps(device_state_payload),
-                    retain=True,
-                )
+    def _publish_device_state(self, device_id: int, device_data: LatestSensorData) -> None:
+        """Publish the latest sensor measurements for a device."""
+        sensor_data_payload = self._process_device_sensor_data(device_data)
+        device_type = device_data.sensorType.name.replace(" ", "_").lower()
+        device_unique_id = f"pulseapp_{device_type}_{device_id}"
+        state_topic = f"pulseapp/{device_unique_id}/state"
+
+        self.logger.info(f"🔄 Publishing state update to topic: {state_topic}")
+        self._queue.mqtt_publish(
+            topic=state_topic,
+            payload=json.dumps(sensor_data_payload),
+            retain=True,
+        )
+
+    def _process_device_sensor_data(self, device_data: LatestSensorData) -> dict[str, Any]:
+        """Return the measurements for a sensor as a state payload."""
+        payload: dict[str, Any] = {}
+        for measurement in device_data.dataPointDto.dataPointValues:
+            param_name = measurement.ParamName.replace(" ", "_").lower()
+            payload[param_name] = measurement.ParamValue
+        return payload
