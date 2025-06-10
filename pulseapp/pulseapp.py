@@ -24,8 +24,8 @@ SENSOR_DISCOVERY_INTERVAL = 3600.0  # 1 hour
 # Assistant logs have context about the source of MQTT messages.
 MQTT_ORIGIN = {
     "name": "Pulse Sensors AppDaemon",
-    "sw": str(__version__),
-    "url": "https://github.com/terpasaurus-midwest/pulse-sensors-appdaemon",
+    "sw_version": str(__version__),
+    "support_url": "https://github.com/terpasaurus-midwest/pulse-sensors-appdaemon",
 }
 
 
