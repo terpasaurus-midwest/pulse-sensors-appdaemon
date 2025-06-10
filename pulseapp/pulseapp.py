@@ -31,31 +31,29 @@ MQTT_ORIGIN = {
 
 class PulseApp(ad.ADBase):
     def __init__(self, ad: "AppDaemon", config_model: "AppConfig"):
-        # Placeholders for the API plugins we need.
         self._adapi: ADAPI | None = None
         self._hass: Hass | None = None
         self._queue: Mqtt | None = None
         self._session: requests.Session | None = None
-
-        # Placeholders for scheduled job handles set up during ``initialize``.
-        self.sensor_update_job_uuid: str | None = None
-        self.sensor_discover_job_uuid: str | None = None
+        self.state_update_job: str | None = None
+        self.discovery_job: str | None = None
+        self.intervals: dict | None = None
         super().__init__(ad, config_model)
 
-    def initialize(self):
-        """Initialize periodic updates and set up API session."""
-        # Load all the plugins we need.
+    def _init_required_apis(self):
         self._adapi: ADAPI = self.get_ad_api()
         # noinspection PyTypeChecker
         self._hass: Hass = self.get_plugin_api("HASS")
         # noinspection PyTypeChecker
         self._queue: Mqtt = self.get_plugin_api("MQTT")
 
-        if not self._hass or not self._queue:
-            raise RuntimeError("❌ Required plugin(s) missing: HASS or MQTT")
+        required = [self._hass, self._queue]
+        if any(plugin is None for plugin in required):
+            raise RuntimeError("❌ Required AppDaemon plugin(s) missing: HASS or MQTT")
 
-        # Set up a persistent requests Session, authenticated.
-        # No API key has to be a hard failure, we can do nothing without one.
+        self._init_pulse_api()
+
+    def _init_pulse_api(self):
         api_key = self._hass.get_state(PULSE_API_KEY_ENTITY)
         if not api_key:
             self.logger.error(f"🛑 Pulse API key not found at {PULSE_API_KEY_ENTITY}")
@@ -64,40 +62,46 @@ class PulseApp(ad.ADBase):
         self._session.headers.update({"x-api-key": api_key})
         self.logger.info("🔗 Created persistent Pulse API session.")
 
-        # If the user specified custom update intervals, use them
-        # otherwise fallback to our defaults
-        update_interval = int(
+    def _set_update_intervals(self):
+        state_update_interval = int(
             float(
                 self._hass.get_state("input_number.sensor_update_interval")
                 or SENSOR_UPDATE_INTERVAL
             )
         )
-        discover_interval = int(
+        discovery_interval = int(
             float(
                 self._hass.get_state("input_number.sensor_discovery_interval")
                 or SENSOR_DISCOVERY_INTERVAL
             )
         )
+        self.intervals = {
+            "state_updates": state_update_interval,
+            "discovery": discovery_interval,
+        }
 
-        # Register scheduled jobs with the AD API helper.
-        self.sensor_update_job_uuid = self._adapi.run_every(
+    def _register_scheduled_ad_jobs(self):
+        self.state_update_job = self._adapi.run_every(
             self.update_sensor_states,
             "now",
-            update_interval,
+            self.intervals["state_updates"],
         )
         self.logger.info(
-            f"⏱️ Registered sensor state update job: {self.sensor_update_job_uuid} ({update_interval} sec)"
-        )
-        self.sensor_discover_job_uuid = self._adapi.run_every(
-            self.discover_hub_sensors,
-            "now",
-            discover_interval,
-        )
-        self.logger.info(
-            f"⏱️ Registered hub sensor discovery job: {self.sensor_discover_job_uuid} ({discover_interval} sec)"
+            f"⏱️ Registered sensor state update job: "
+            f"{self.state_update_job} ({self.intervals['state_updates']} sec)"
         )
 
-        # Listen for changes to update intervals (from the UI or wherever)
+        self.discovery_job = self._adapi.run_every(
+            self.discover_hub_sensors,
+            "now",
+            self.intervals["discovery"],
+        )
+        self.logger.info(
+            f"⏱️ Registered hub sensor discovery job: "
+            f"{self.discovery_job} ({self.intervals['discovery']} sec)"
+        )
+
+    def _register_update_interval_listeners(self):
         # noinspection PyTypeChecker
         self._hass.listen_state(
             self.update_intervals, "input_number.sensor_update_interval"
@@ -107,37 +111,16 @@ class PulseApp(ad.ADBase):
             self.update_intervals, "input_number.sensor_discovery_interval"
         )
 
-        # Kick off discovery shortly after we start, so the user doesn't wait an hour
+    def initialize(self):
+        """Initialize API sessions and register scheduled jobs and listeners.
+
+        An initial discovery job will be launched 10 seconds after initialization.
+        """
+        self._init_required_apis()
+        self._set_update_intervals()
+        self._register_scheduled_ad_jobs()
+        self._register_update_interval_listeners()
         self._adapi.run_in(self.discover_hub_sensors, 10)
-
-    def update_intervals(self, entity, attribute, old, new, **kwargs):
-        """Reconfigure intervals when input_number changes."""
-        new_interval = int(float(new))
-
-        # Only cancel if we had a scheduled job handle
-        if entity == "input_number.sensor_update_interval":
-            if self.sensor_update_job_uuid:
-                self._adapi.cancel_timer(self.sensor_update_job_uuid)
-            self.sensor_update_job_uuid = self._adapi.run_every(
-                self.update_sensor_states,
-                "now",
-                new_interval,
-            )
-            self.logger.info(
-                f"📝️ Updated sensor state update interval to {new_interval} sec"
-            )
-
-        elif entity == "input_number.sensor_discovery_interval":
-            if self.sensor_discover_job_uuid:
-                self._adapi.cancel_timer(self.sensor_discover_job_uuid)
-            self.sensor_discover_job_uuid = self._adapi.run_every(
-                self.discover_hub_sensors,
-                "now",
-                new_interval,
-            )
-            self.logger.info(
-                f"📝️ Updated hub sensor discovery interval to {new_interval} sec"
-            )
 
     def terminate(self):
         """Close the session when the AppDaemon context is terminated."""
@@ -147,19 +130,37 @@ class PulseApp(ad.ADBase):
 
         self.logger.info("🛑 Pulse Sensor app terminated.")
 
-    def make_request(
+    def update_intervals(self, entity, attribute, old, new, **kwargs):
+        """Reconfigure intervals when input_number changes."""
+        new_interval = int(float(new))
+
+        if entity == "input_number.sensor_update_interval":
+            if self.state_update_job:
+                self._adapi.cancel_timer(self.state_update_job)
+            self.state_update_job = self._adapi.run_every(
+                self.update_sensor_states,
+                "now",
+                new_interval,
+            )
+            self.logger.info(
+                f"📝️ Updated sensor state update interval to {new_interval} sec"
+            )
+
+        elif entity == "input_number.sensor_discovery_interval":
+            if self.discovery_job:
+                self._adapi.cancel_timer(self.discovery_job)
+            self.discovery_job = self._adapi.run_every(
+                self.discover_hub_sensors,
+                "now",
+                new_interval,
+            )
+            self.logger.info(
+                f"📝️ Updated hub sensor discovery interval to {new_interval} sec"
+            )
+
+    def _make_pulse_api_request(
         self, endpoint: str, method: str = "GET", **kwargs
     ) -> Union[dict[str, Any], list[Any], None]:
-        """Unified method to make an API request to the Pulse API.
-
-        This is mostly just exposing request.Session().request() for convenience.
-
-        :param endpoint: API endpoint (appended to PULSE_API_BASE).
-        :param method: HTTP method (default: "GET").
-        :param kwargs: Additional request parameters (json, params, etc.).
-                       Supports 'ignore_errors=True' to suppress error logs.
-        :return: JSON response (dict) or None if an error occurs (or {} if 'ignore_errors' is set).
-        """
         url = f"{PULSE_API_BASE}{endpoint}"
         ignore_errors = kwargs.pop("ignore_errors", False)
 
@@ -176,7 +177,7 @@ class PulseApp(ad.ADBase):
         """Fetch all hub IDs."""
         url = "/hubs/ids"
         self.logger.info(f"📡 Fetching hub IDs at: {url}")
-        return self.make_request(url)
+        return self._make_pulse_api_request(url)
 
     def get_hub_details(self, hub_id: int) -> Optional[HubDetails]:
         """Fetch and validate hub details and attached sensor devices.
@@ -187,7 +188,7 @@ class PulseApp(ad.ADBase):
         url = f"/hubs/{hub_id}"
         self.logger.info(f"📡 Fetching hub details for {hub_id} at: {url}")
 
-        response = self.make_request(url)
+        response = self._make_pulse_api_request(url)
         if not response:
             self.logger.warning(f"⚠️ No data received for hub {hub_id}")
             return None
@@ -209,7 +210,7 @@ class PulseApp(ad.ADBase):
             f"📡 Fetching latest sensor measurements for {sensor_id}: {url}"
         )
 
-        response = self.make_request(url)
+        response = self._make_pulse_api_request(url)
         if not response:
             self.logger.warning(f"⚠️ No data received from sensor {sensor_id}")
             return None
