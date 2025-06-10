@@ -10,23 +10,26 @@ from appdaemon.models.config.app import AppConfig
 from appdaemon.plugins.hass.hassapi import Hass
 from appdaemon.plugins.mqtt.mqttapi import Mqtt
 
-from pulse_models import HubDetails, LatestSensorData, DeviceClass
+from models import HubDetails, LatestSensorData, DeviceClass
 
-__version__ = '0.1.0'
+__version__ = "0.1.0"
 
 PULSE_API_KEY_ENTITY = "input_text.pulse_api_key"
 PULSE_API_BASE = "https://api.pulsegrow.com"
 API_TIMEOUT = 10.0
-SENSOR_UPDATE_INTERVAL = 60.0  # 1 minutes
+SENSOR_UPDATE_INTERVAL = 60.0  # 1 minute
 SENSOR_DISCOVERY_INTERVAL = 3600.0  # 1 hour
-MQTT_ORIGIN_INFO = {
+
+# This is added to device discovery messages so, Home
+# Assistant logs have context about the source of MQTT messages.
+MQTT_ORIGIN = {
     "name": "Pulse Sensors AppDaemon",
     "sw": str(__version__),
     "url": "https://github.com/terpasaurus-midwest/pulse-sensors-appdaemon",
 }
 
 
-class PulseSensors(ad.ADBase):
+class PulseApp(ad.ADBase):
     def __init__(self, ad: "AppDaemon", config_model: "AppConfig"):
         # Placeholders for the API plugins we need.
         self._adapi: ADAPI | None = None
@@ -61,14 +64,18 @@ class PulseSensors(ad.ADBase):
 
         # If the user specified custom update intervals, use them
         # otherwise fallback to our defaults
-        update_interval = int(float(
-            self._hass.get_state("input_number.sensor_update_interval")
-            or SENSOR_UPDATE_INTERVAL
-        ))
-        discover_interval = int(float(
-            self._hass.get_state("input_number.sensor_discovery_interval")
-            or SENSOR_DISCOVERY_INTERVAL
-        ))
+        update_interval = int(
+            float(
+                self._hass.get_state("input_number.sensor_update_interval")
+                or SENSOR_UPDATE_INTERVAL
+            )
+        )
+        discover_interval = int(
+            float(
+                self._hass.get_state("input_number.sensor_discovery_interval")
+                or SENSOR_DISCOVERY_INTERVAL
+            )
+        )
 
         # Register scheduled jobs with the AD API helper.
         self.sensor_update_job_uuid = self._adapi.run_every(
@@ -89,8 +96,12 @@ class PulseSensors(ad.ADBase):
         )
 
         # Listen for changes to update intervals (from the UI or wherever)
-        self._hass.listen_state(self.update_intervals, "input_number.sensor_update_interval")
-        self._hass.listen_state(self.update_intervals, "input_number.sensor_discovery_interval")
+        self._hass.listen_state(
+            self.update_intervals, "input_number.sensor_update_interval"
+        )
+        self._hass.listen_state(
+            self.update_intervals, "input_number.sensor_discovery_interval"
+        )
 
         # Kick off discovery shortly after we start, so the user doesn't wait an hour
         self._adapi.run_in(self.discover_hub_sensors, 10)
@@ -108,7 +119,9 @@ class PulseSensors(ad.ADBase):
                 "now",
                 new_interval,
             )
-            self.logger.info(f"📝️ Updated sensor state update interval to {new_interval} sec")
+            self.logger.info(
+                f"📝️ Updated sensor state update interval to {new_interval} sec"
+            )
 
         elif entity == "input_number.sensor_discovery_interval":
             if self.sensor_discover_job_uuid:
@@ -118,7 +131,9 @@ class PulseSensors(ad.ADBase):
                 "now",
                 new_interval,
             )
-            self.logger.info(f"📝️ Updated hub sensor discovery interval to {new_interval} sec")
+            self.logger.info(
+                f"📝️ Updated hub sensor discovery interval to {new_interval} sec"
+            )
 
     def terminate(self):
         """Close the session when the AppDaemon context is terminated."""
@@ -129,10 +144,7 @@ class PulseSensors(ad.ADBase):
         self.logger.info("🛑 Pulse Sensor app terminated.")
 
     def make_request(
-        self,
-        endpoint: str,
-        method: str = "GET",
-        **kwargs
+        self, endpoint: str, method: str = "GET", **kwargs
     ) -> Union[dict[str, Any], list[Any], None]:
         """Unified method to make an API request to the Pulse API.
 
@@ -189,7 +201,9 @@ class PulseSensors(ad.ADBase):
         :return: A validated LatestSensorData object if successful, or None if request or validation fails.
         """
         url = f"/sensors/{sensor_id}/recent-data"
-        self.logger.info(f"📡 Fetching latest sensor measurements for {sensor_id}: {url}")
+        self.logger.info(
+            f"📡 Fetching latest sensor measurements for {sensor_id}: {url}"
+        )
 
         response = self.make_request(url)
         if not response:
@@ -210,7 +224,9 @@ class PulseSensors(ad.ADBase):
             self.logger.warning("⚠️ No hubs found, skipping sensor discovery.")
             return
 
-        self.logger.info(f"🔍 Discovery: Found {len(hub_ids)} hub devices, getting details...")
+        self.logger.info(
+            f"🔍 Discovery: Found {len(hub_ids)} hub devices, getting details..."
+        )
 
         discovered_sensor_count = 0
         discovered_hubs = []
@@ -221,35 +237,37 @@ class PulseSensors(ad.ADBase):
                 self.logger.warning(f"⚠️ No data found for hub {hub_id}, skipping.")
                 continue
 
-            self.logger.info(f"🔍 Discovery: Data found for hub {hub_id}, generating MQTT payload...")
+            self.logger.info(
+                f"🔍 Discovery: Data found for hub {hub_id}, generating MQTT payload..."
+            )
 
             # The hub mac doesn't use colons, so convert it to a string that does
             hub_mac_address = ":".join(textwrap.wrap(hub.macAddress, 2))
             hub_unique_id = f"pulseapp_hub_{hub.id}"
             hub_payload = {
-                "o": MQTT_ORIGIN_INFO,
+                "o": MQTT_ORIGIN,
                 "dev": {
                     "ids": hub_unique_id,
                     "name": hub.name,
                     "mf": "Pulse Labs, Inc.",
                     "mdl": "Pulse Hub",
                     "mdl_id": "HUB",
-                    "cns": [
-                        ["mac", hub_mac_address]
-                    ],
+                    "cns": [["mac", hub_mac_address]],
                 },
                 "cmps": {
                     f"{hub_unique_id}_void": {
                         "p": "binary_sensor",
                         "name": f"{hub.name} {hub.id}",
                         "unique_id": hub_unique_id,
-                        "stat_t": f"pulseapp/{hub_unique_id}/state"
+                        "stat_t": f"pulseapp/{hub_unique_id}/state",
                     }
-                }
+                },
             }
             hub_config_topic = f"homeassistant/device/{hub_unique_id}/config"
 
-            self.logger.info(f"🔍 Discovery: Publishing discovery message for hub {hub_id}: {hub_config_topic}")
+            self.logger.info(
+                f"🔍 Discovery: Publishing discovery message for hub {hub_id}: {hub_config_topic}"
+            )
             self._queue.mqtt_publish(
                 topic=hub_config_topic,
                 payload=json.dumps(hub_payload),
@@ -259,14 +277,20 @@ class PulseSensors(ad.ADBase):
             discovered_hubs.append(hub.model_dump())
 
             if hub.sensorDevices:
-                self.logger.info(f"🔍 Discovery: processing {len(hub.sensorDevices)} connected devices on {hub_id}...")
+                self.logger.info(
+                    f"🔍 Discovery: processing {len(hub.sensorDevices)} connected devices on {hub_id}..."
+                )
             else:
-                self.logger.info(f"🔍 Discovery: no devices found connected to this hub: {hub_id} ")
+                self.logger.info(
+                    f"🔍 Discovery: no devices found connected to this hub: {hub_id} "
+                )
 
             for device in hub.sensorDevices:
                 latest = self.get_sensor_latest_data(device.id)
                 if latest is None:
-                    self.logger.warning(f"🔍 Discovery: no data received for device {device.id}, skipping.")
+                    self.logger.warning(
+                        f"🔍 Discovery: no data received for device {device.id}, skipping."
+                    )
                     continue
 
                 # Derive a unique ID for the device, to generate a suitable discovery config topic
@@ -274,30 +298,38 @@ class PulseSensors(ad.ADBase):
                 sensor_type_name = latest.sensorType.name.lower()
                 device_unique_id = f"pulseapp_{sensor_type_name}_{device.id}"
                 device_config_topic = f"homeassistant/device/{device_unique_id}/config"
-                self.logger.info(f"🔍 Discovery: found device {device_unique_id}, processing its components")
+                self.logger.info(
+                    f"🔍 Discovery: found device {device_unique_id}, processing its components"
+                )
 
                 # Generate a component config for each connected sensor of this device.
                 components: dict[str, dict[str, Any]] = {}
                 for measurement in latest.dataPointDto.dataPointValues:
                     param_name = measurement.ParamName.replace(" ", "_").lower()
                     comp_unique_id = f"{device_unique_id}_{param_name}"
-                    device_class_enum = DeviceClass.from_param_name(measurement.ParamName)
+                    device_class_enum = DeviceClass.from_param_name(
+                        measurement.ParamName
+                    )
                     components[comp_unique_id] = {
                         "p": "sensor",
                         "name": f"{measurement.ParamName}",
                         "unique_id": comp_unique_id,
                         "object_id": comp_unique_id,
                         "unit_of_measurement": measurement.MeasuringUnit,
-                        "device_class": device_class_enum.value if device_class_enum else None,
+                        "device_class": device_class_enum.value
+                        if device_class_enum
+                        else None,
                         "stat_t": f"pulseapp/{device_unique_id}/state",
-                        "value_template": f"{{{{ value_json.{param_name} }}}}"
+                        "value_template": f"{{{{ value_json.{param_name} }}}}",
                     }
                     discovered_sensor_count += 1
 
                 # Build the final device discovery message, including sensor components from earlier
-                self.logger.info(f"🔍 Discovery: generating MQTT payload for device {device_unique_id}")
+                self.logger.info(
+                    f"🔍 Discovery: generating MQTT payload for device {device_unique_id}"
+                )
                 device_payload = {
-                    "o": MQTT_ORIGIN_INFO,
+                    "o": MQTT_ORIGIN,
                     "dev": {
                         "ids": device_unique_id,
                         "name": f"{latest.name}",
@@ -309,7 +341,9 @@ class PulseSensors(ad.ADBase):
                     "cmps": components,
                 }
 
-                self.logger.info(f"🔍 Discovery: publishing discovery message for {device_unique_id}: {device_config_topic}")
+                self.logger.info(
+                    f"🔍 Discovery: publishing discovery message for {device_unique_id}: {device_config_topic}"
+                )
                 self._queue.mqtt_publish(
                     topic=device_config_topic,
                     payload=json.dumps(device_payload),
@@ -319,10 +353,14 @@ class PulseSensors(ad.ADBase):
         self._hass.set_state(
             "sensor.pulseapp_discovered_hubs",
             state=len(discovered_hubs),
-            attributes={"hubs": discovered_hubs}
+            attributes={"hubs": discovered_hubs},
         )
-        self._hass.set_state("sensor.pulseapp_discovered_sensors", state=discovered_sensor_count)
-        self.logger.info(f"✅ Discovered {discovered_sensor_count} sensors across {len(discovered_hubs)} hubs.")
+        self._hass.set_state(
+            "sensor.pulseapp_discovered_sensors", state=discovered_sensor_count
+        )
+        self.logger.info(
+            f"✅ Discovered {discovered_sensor_count} sensors across {len(discovered_hubs)} hubs."
+        )
 
     def update_sensor_states(self, **kwargs):
         """Get the latest data points for every connected sensor and publish them to MQTT."""

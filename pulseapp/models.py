@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 class DeviceType(IntEnum):
     """Pulse device types as defined in the Pulse API spec."""
+
     PULSE_ONE = 0  # Original Pulse One device
     PULSE_PRO = 1  # Pulse Pro device
     HUB = 2  # Pulse Hub device
@@ -35,11 +36,12 @@ class SensorType(IntEnum):
     please create an issue or PR on the GitHub repo, and I'll try to
     support it.
     """
+
     HUB = 0  # Hub device
     VWC1 = 1  # Acclima TDR 310W - Soil Moisture Sensor
     THV1 = 2  # Temperature, Humidity, VPD Sensor
     PH10 = 3  # pH Sensor
-    EC1 = 4   # Electrical Conductivity Sensor
+    EC1 = 4  # Electrical Conductivity Sensor
     VWC12 = 5  # TEROS12 Retrofit Kit - Soil Moisture Sensor
     PAR1 = 8  # PAR (Light) Sensor
     VWC2 = 9  # Terralink (Pulse-vendored) - Soil Moisture Sensor
@@ -57,6 +59,7 @@ class SensorType(IntEnum):
 
 class SensorReadingType(IntEnum):
     """Sensor reading types as defined in the Pulse API spec."""
+
     # Acclima (VWC1)
     VWC1_RH = 0  # VWC1 - Relative Humidity Reading
     VWC1_TEMPERATURE = 1  # VWC1 - Temperature Reading

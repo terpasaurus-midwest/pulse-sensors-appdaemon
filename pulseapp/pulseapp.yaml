@@ -1,7 +1,7 @@
 ---
-pulse_sensors:
-  module: pulse_sensors
-  class: PulseSensors
+pulseapp:
+  module: pulseapp
+  class: PulseApp
   # allows using **kwargs in the app code
   # see: https://appdaemon.readthedocs.io/en/latest/APPGUIDE.html#kwargs
   use_dictionary_unpacking: true
