@@ -46,7 +46,9 @@ class PulseApp(ad.ADBase):
         """Initialize periodic updates and set up API session."""
         # Load all the plugins we need.
         self._adapi: ADAPI = self.get_ad_api()
+        # noinspection PyTypeChecker
         self._hass: Hass = self.get_plugin_api("HASS")
+        # noinspection PyTypeChecker
         self._queue: Mqtt = self.get_plugin_api("MQTT")
 
         if not self._hass or not self._queue:
@@ -96,9 +98,11 @@ class PulseApp(ad.ADBase):
         )
 
         # Listen for changes to update intervals (from the UI or wherever)
+        # noinspection PyTypeChecker
         self._hass.listen_state(
             self.update_intervals, "input_number.sensor_update_interval"
         )
+        # noinspection PyTypeChecker
         self._hass.listen_state(
             self.update_intervals, "input_number.sensor_discovery_interval"
         )
@@ -246,6 +250,7 @@ class PulseApp(ad.ADBase):
 
     def update_sensor_states(self, **kwargs):
         """Publish the latest data points for each connected hub and sensor device."""
+        # noinspection PyTypeChecker
         discovered_hubs: dict[dict, Any] = self._hass.get_state(
             "sensor.pulseapp_discovered_hubs",
             attribute="hubs",
