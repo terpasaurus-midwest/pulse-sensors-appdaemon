@@ -25,3 +25,12 @@ ruff = "^0.11.13"
 
 [tool.ruff]
 target-version = "py312"
+
+[tool.pyright]
+reportOptionalMemberAccess = false
+reportUnknownMemberType = false
+reportExplicitAny = false
+reportAny = false
+reportAttributeAccessIssue = "warning"
+reportUnusedParameter = "information"
+reportMissingTypeStubs = false

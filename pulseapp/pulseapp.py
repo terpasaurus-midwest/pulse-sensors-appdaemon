@@ -1,5 +1,6 @@
-from typing import Any, List, Optional, Union
+from typing import Any
 import json
+
 import requests
 import textwrap
 
@@ -7,12 +8,10 @@ from pydantic import ValidationError
 from appdaemon import adbase as ad
 from appdaemon import AppDaemon, ADAPI
 from appdaemon.models.config.app import AppConfig
-from appdaemon.plugins.hass.hassapi import Hass
-from appdaemon.plugins.mqtt.mqttapi import Mqtt
 
-from models import HubDetails, LatestSensorData, DeviceClass
+from .models import HubDetails, LatestSensorData, DeviceClass
 
-__version__ = "0.1.0"
+__version__ = "1.0.1"
 
 PULSE_API_KEY_ENTITY = "input_text.pulse_api_key"
 PULSE_API_BASE = "https://api.pulsegrow.com"
@@ -31,26 +30,28 @@ MQTT_ORIGIN = {
 
 class PulseApp(ad.ADBase):
     def __init__(self, ad: "AppDaemon", config_model: "AppConfig"):
-        self._adapi: ADAPI | None = None
-        self._hass: Hass | None = None
-        self._queue: Mqtt | None = None
+        self._adapi: ADAPI | None
+        self._hass: ADAPI | None
+        self._queue: ADAPI | None
         self._session: requests.Session | None = None
         self.state_update_job: str | None = None
         self.discovery_job: str | None = None
-        self.intervals: dict | None = None
         super().__init__(ad, config_model)
 
+    def _ensure_plugins_loaded(self):
+        required_plugins = [
+            ("HASS", self._hass),
+            ("MQTT", self._queue),
+        ]
+        for name, plugin in required_plugins:
+            if plugin is None:
+                raise RuntimeError(f"❌ Required AppDaemon plugin missing: {name}")
+
     def _init_required_apis(self):
-        self._adapi: ADAPI = self.get_ad_api()
-        # noinspection PyTypeChecker
-        self._hass: Hass = self.get_plugin_api("HASS")
-        # noinspection PyTypeChecker
-        self._queue: Mqtt = self.get_plugin_api("MQTT")
-
-        required = [self._hass, self._queue]
-        if any(plugin is None for plugin in required):
-            raise RuntimeError("❌ Required AppDaemon plugin(s) missing: HASS or MQTT")
-
+        self._adapi = self.get_ad_api()
+        self._hass = self.get_plugin_api("HASS")
+        self._queue = self.get_plugin_api("MQTT")
+        self._ensure_plugins_loaded()
         self._init_pulse_api()
 
     def _init_pulse_api(self):
@@ -59,55 +60,51 @@ class PulseApp(ad.ADBase):
             self.logger.error(f"🛑 Pulse API key not found at {PULSE_API_KEY_ENTITY}")
             raise RuntimeError(f"Pulse API key not found at: {PULSE_API_KEY_ENTITY}")
         self._session = requests.Session()
-        self._session.headers.update({"x-api-key": api_key})
+        self._session.headers["x-api-key"] = str(api_key)
         self.logger.info("🔗 Created persistent Pulse API session.")
 
-    def _set_update_intervals(self):
+    def _get_update_intervals(self):
         state_update_interval = int(
             float(
-                self._hass.get_state("input_number.sensor_update_interval")
+                str(self._hass.get_state("input_number.sensor_update_interval"))
                 or SENSOR_UPDATE_INTERVAL
             )
         )
         discovery_interval = int(
             float(
-                self._hass.get_state("input_number.sensor_discovery_interval")
+                str(self._hass.get_state("input_number.sensor_discovery_interval"))
                 or SENSOR_DISCOVERY_INTERVAL
             )
         )
-        self.intervals = {
-            "state_updates": state_update_interval,
-            "discovery": discovery_interval,
-        }
+        return state_update_interval, discovery_interval
 
     def _register_scheduled_ad_jobs(self):
+        state_update_interval, discovery_interval = self._get_update_intervals()
         self.state_update_job = self._adapi.run_every(
             self.update_sensor_states,
             "now",
-            self.intervals["state_updates"],
+            state_update_interval,
         )
         self.logger.info(
             f"⏱️ Registered sensor state update job: "
-            f"{self.state_update_job} ({self.intervals['state_updates']} sec)"
+            + f"{self.state_update_job} ({state_update_interval} sec)"
         )
 
         self.discovery_job = self._adapi.run_every(
             self.discover_hub_sensors,
             "now",
-            self.intervals["discovery"],
+            discovery_interval,
         )
         self.logger.info(
             f"⏱️ Registered hub sensor discovery job: "
-            f"{self.discovery_job} ({self.intervals['discovery']} sec)"
+            + f"{self.discovery_job} ({discovery_interval} sec)"
         )
 
     def _register_update_interval_listeners(self):
-        # noinspection PyTypeChecker
-        self._hass.listen_state(
+        _ = self._adapi.listen_state(
             self.update_intervals, "input_number.sensor_update_interval"
         )
-        # noinspection PyTypeChecker
-        self._hass.listen_state(
+        _ = self._adapi.listen_state(
             self.update_intervals, "input_number.sensor_discovery_interval"
         )
 
@@ -117,10 +114,9 @@ class PulseApp(ad.ADBase):
         An initial discovery job will be launched 10 seconds after initialization.
         """
         self._init_required_apis()
-        self._set_update_intervals()
         self._register_scheduled_ad_jobs()
         self._register_update_interval_listeners()
-        self._adapi.run_in(self.discover_hub_sensors, 10)
+        _ = self._adapi.run_in(self.discover_hub_sensors, 10)
 
     def terminate(self):
         """Close the session when the AppDaemon context is terminated."""
@@ -130,13 +126,15 @@ class PulseApp(ad.ADBase):
 
         self.logger.info("🛑 Pulse Sensor app terminated.")
 
-    def update_intervals(self, entity, attribute, old, new, **kwargs):
+    def update_intervals(
+        self, entity: str, attribute: str, old: Any, new: Any, **kwargs: Any
+    ) -> None:
         """Reconfigure intervals when input_number changes."""
         new_interval = int(float(new))
 
         if entity == "input_number.sensor_update_interval":
             if self.state_update_job:
-                self._adapi.cancel_timer(self.state_update_job)
+                _ = self._adapi.cancel_timer(self.state_update_job)
             self.state_update_job = self._adapi.run_every(
                 self.update_sensor_states,
                 "now",
@@ -148,7 +146,7 @@ class PulseApp(ad.ADBase):
 
         elif entity == "input_number.sensor_discovery_interval":
             if self.discovery_job:
-                self._adapi.cancel_timer(self.discovery_job)
+                _ = self._adapi.cancel_timer(self.discovery_job)
             self.discovery_job = self._adapi.run_every(
                 self.discover_hub_sensors,
                 "now",
@@ -159,8 +157,8 @@ class PulseApp(ad.ADBase):
             )
 
     def _make_pulse_api_request(
-        self, endpoint: str, method: str = "GET", **kwargs
-    ) -> Union[dict[str, Any], list[Any], None]:
+        self, endpoint: str, method: str = "GET", **kwargs: Any
+    ) -> dict[str, Any] | list[Any] | None:
         url = f"{PULSE_API_BASE}{endpoint}"
         ignore_errors = kwargs.pop("ignore_errors", False)
 
@@ -173,18 +171,17 @@ class PulseApp(ad.ADBase):
                 return {}
             raise
 
-    def get_hub_ids(self) -> List[int]:
+    def get_hub_ids(self) -> list[int] | None:
         """Fetch all hub IDs."""
-        url = "/hubs/ids"
-        self.logger.info(f"📡 Fetching hub IDs at: {url}")
-        return self._make_pulse_api_request(url)
+        self.logger.info(f"📡 Fetching hub IDs")
+        hub_ids = self._make_pulse_api_request("/hubs/ids")
+        if not hub_ids or not isinstance(hub_ids, list):
+            self.logger.warning("❌ No hubs returned by the Pulse API")
+            return []
+        return hub_ids
 
-    def get_hub_details(self, hub_id: int) -> Optional[HubDetails]:
-        """Fetch and validate hub details and attached sensor devices.
-
-        :param hub_id: The ID of the hub to fetch.
-        :return: A validated HubDetails object if successful, or None if request or validation fails.
-        """
+    def get_hub_details(self, hub_id: int) -> HubDetails | None:
+        """Fetch and validate hub details and attached sensor devices."""
         url = f"/hubs/{hub_id}"
         self.logger.info(f"📡 Fetching hub details for {hub_id} at: {url}")
 
@@ -194,12 +191,12 @@ class PulseApp(ad.ADBase):
             return None
 
         try:
-            return HubDetails(**response)
+            return HubDetails(**response)  # pyright: ignore [reportCallIssue]
         except ValidationError:
             self.logger.exception(f"❌ Validation error for hub {hub_id}")
             return None
 
-    def get_sensor_latest_data(self, sensor_id: int) -> Optional[LatestSensorData]:
+    def get_sensor_latest_data(self, sensor_id: int) -> LatestSensorData | None:
         """Fetch and validate the latest measurements for a sensor.
 
         :param sensor_id: The ID of the sensor to fetch.
@@ -216,12 +213,12 @@ class PulseApp(ad.ADBase):
             return None
 
         try:
-            return LatestSensorData(**response)
+            return LatestSensorData(**response)  # pyright: ignore [reportCallIssue]
         except ValidationError:
             self.logger.exception(f"❌ Validation error for sensor {sensor_id}")
             return None
 
-    def discover_hub_sensors(self, **kwargs):
+    def discover_hub_sensors(self, **kwargs: Any):  # pyright: ignore [reportUnusedParameter]
         """Discover all sensors and store their IDs."""
         self.logger.info("🔍 Discovering any hubs and their sensors...")
         hub_ids = self.get_hub_ids()
@@ -237,35 +234,32 @@ class PulseApp(ad.ADBase):
             hub_ids
         )
 
-        self._hass.set_state(
+        _ = self._hass.set_state(
             "sensor.pulseapp_discovered_hubs",
             state=len(discovered_hubs),
             attributes={"hubs": discovered_hubs},
         )
-        self._hass.set_state(
+        _ = self._hass.set_state(
             "sensor.pulseapp_discovered_sensors", state=discovered_sensor_count
         )
         self.logger.info(
             f"✅ Discovered {discovered_sensor_count} sensors across {len(discovered_hubs)} hubs."
         )
 
-    def update_sensor_states(self, **kwargs):
+    def update_sensor_states(self, **kwargs: Any):  # pyright: ignore [reportUnusedParameter]
         """Publish the latest data points for each connected hub and sensor device."""
-        # noinspection PyTypeChecker
-        discovered_hubs: dict[dict, Any] = self._hass.get_state(
+        discovered_hubs = self._hass.get_state(
             "sensor.pulseapp_discovered_hubs",
             attribute="hubs",
         )
 
-        if not discovered_hubs:
+        if not discovered_hubs or isinstance(discovered_hubs, dict):
             self.logger.warning("⚠️ No sensors discovered yet, skipping update.")
             return
 
         for hub in discovered_hubs:
-            # Ensure this hub's fake binary sensor component is marked as ``ON``
             self._publish_hub_state(hub)
 
-            # Get and publish the latest readings for each connected sensor device
             for device in hub["sensorDevices"]:
                 device_data = self.get_sensor_latest_data(device["id"])
                 if device_data is None:
@@ -275,7 +269,7 @@ class PulseApp(ad.ADBase):
     def _publish_hub_state(self, hub: dict[str, Any]) -> None:
         """Publish the hub state and update all attached devices."""
         hub_unique_id = f"pulseapp_hub_{hub['id']}"
-        self._queue.mqtt_publish(
+        self._queue.mqtt_publish(  # pyright: ignore [reportAttributeAccessIssue]
             topic=f"pulseapp/{hub_unique_id}/state",
             payload="ON",
             retain=True,
@@ -286,12 +280,12 @@ class PulseApp(ad.ADBase):
     ) -> None:
         """Publish the latest sensor measurements for a device."""
         sensor_data_payload = self._generate_sensor_payload(device_data)
-        device_type = device_data.sensorType.name.replace(" ", "_").lower()
+        device_type = str(device_data.sensorType.name).replace(" ", "_").lower()
         device_unique_id = f"pulseapp_{device_type}_{device_id}"
         state_topic = f"pulseapp/{device_unique_id}/state"
 
         self.logger.info(f"🔄 Publishing state update to topic: {state_topic}")
-        self._queue.mqtt_publish(
+        self._queue.mqtt_publish(  # pyright: ignore [reportAttributeAccessIssue]
             topic=state_topic,
             payload=json.dumps(sensor_data_payload),
             retain=True,
@@ -374,7 +368,7 @@ class PulseApp(ad.ADBase):
             self.logger.info(
                 f"🔍 Discovery: publishing discovery message for {device_unique_id}: {device_config_topic}"
             )
-            self._queue.mqtt_publish(
+            self._queue.mqtt_publish(  # pyright: ignore [reportAttributeAccessIssue]
                 topic=device_config_topic,
                 payload=json.dumps(device_payload),
                 retain=True,
@@ -383,7 +377,7 @@ class PulseApp(ad.ADBase):
         return discovered_sensor_count
 
     def _process_and_publish_hubs(
-        self, hub_ids: List[int]
+        self, hub_ids: list[int]
     ) -> tuple[int, list[dict[str, Any]]]:
         """Process hubs, publish discovery, and return totals."""
         discovered_sensor_count = 0
@@ -424,7 +418,7 @@ class PulseApp(ad.ADBase):
             self.logger.info(
                 f"🔍 Discovery: Publishing discovery message for hub {hub_id}: {hub_config_topic}"
             )
-            self._queue.mqtt_publish(
+            self._queue.mqtt_publish(  # pyright: ignore [reportAttributeAccessIssue]
                 topic=hub_config_topic,
                 payload=json.dumps(hub_payload),
                 retain=True,

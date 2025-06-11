@@ -33,6 +33,8 @@ Use Python 3.11 features and keep the code readable. Try to follow PEP8 and esta
 Use `poetry ruff check` as your linter and `poetry ruff format` as your formatter. They are configured in
 `pyproject.toml`. This tool has been preinstalled in your current operating environment.
 
+The linting tool `basedpyright` is also used to check the code for type errors and similar issues.
+
 ## API Response Examples
 The `mock_responses` directory contains JSON files which show the Pulse APi response for a recent data API call
 to a THV and VWC sensor, as well as a request to get all data for a hub. There is also an example showing an
