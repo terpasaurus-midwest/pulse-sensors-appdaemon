@@ -1,6 +1,6 @@
 ---
 pulseapp:
-  module: pulseapp.pulseapp
+  module: pulseapp.app
   class: PulseApp
   # allows using **kwargs in the app code
   # see: https://appdaemon.readthedocs.io/en/latest/APPGUIDE.html#kwargs
