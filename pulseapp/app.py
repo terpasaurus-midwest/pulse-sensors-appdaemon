@@ -1,6 +1,7 @@
 from typing import Any
 import json
 import textwrap
+import uuid
 
 from pydantic import ValidationError
 from appdaemon import adbase as ad
@@ -17,6 +18,7 @@ PULSE_API_BASE = "https://api.pulsegrow.com"
 API_TIMEOUT = 10.0
 SENSOR_UPDATE_INTERVAL = 60.0  # 1 minute
 SENSOR_DISCOVERY_INTERVAL = 3600.0  # 1 hour
+BASE_AD_NAMESPACE: str = str(__package__)
 
 # This is added to device discovery messages so, Home
 # Assistant logs have context about the source of MQTT messages.
@@ -48,6 +50,9 @@ class PulseApp(ad.ADBase):
 
     def _init_required_apis(self):
         self._adapi = self.get_ad_api()
+        my_unique_id = str(uuid.uuid4()).split("-")[0]
+        my_namespace = f"{BASE_AD_NAMESPACE}_{my_unique_id}"
+        self._adapi.set_namespace(my_namespace)
         self._hass = self.get_plugin_api("HASS")
         self._queue = self.get_plugin_api("MQTT")
         self._ensure_plugins_loaded()
