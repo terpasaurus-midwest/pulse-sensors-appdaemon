@@ -2,16 +2,13 @@
 name = "pulse-sensors-appdaemon"
 version = "1.0.1"
 description = "AppDaemon script to find and expose Pulse Grow sensors to Home Assistant."
-license = {text = "Apache-2.0"}
+license = { text = "Apache-2.0" }
 authors = [
-    {name = "Terpasaurus Midwest",email = "terpasaurus-midwest@protonmail.com"}
+    { name = "Terpasaurus Midwest", email = "terpasaurus-midwest@protonmail.com" },
 ]
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
-dependencies = [
-    "pydantic (>=2.10.6,<3.0.0)",
-    "appdaemon (>=4.5.10,<5.0.0)"
-]
+dependencies = ["pydantic (>=2.10.6,<3.0.0)", "appdaemon (>=4.5.10,<5.0.0)"]
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
