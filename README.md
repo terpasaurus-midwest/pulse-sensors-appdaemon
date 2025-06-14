@@ -10,6 +10,8 @@ This AppDaemon app integrates Pulse Labs sensor data into Home Assistant via MQT
 - Sensors work seamlessly with Home Assistant features like generic thermostats, hygrostats, and automation helpers.
 - Makes Pulse data accessible to any MQTT-capable client—not just Home Assistant.
 
+You can also find my [thread here](https://community.pulsegrow.com/t/a-home-assistant-mqtt-integration-for-pulse-hubs/1525) on the Pulse Grow forums.
+
 ## Why This Helps
 
 Pulse Labs doesn’t support MQTT or Home Assistant natively, which limits local automation. This app bridges that
@@ -24,14 +26,17 @@ gap—once installed, you can:
 ## Screenshots
 
 With this integration, sensors like Pulse's VWC show up in Home Assistant under their respective hubs, with all
-connected measurement values (e.g., VWC, Bulk EC, Pore Water EC, Temp) exposed as individual entities. From there, 
+connected measurement values (e.g., VWC, Bulk EC, Pore Water EC, Temp) exposed as individual entities. From there,
 they behave like any other MQTT-native sensor in HA.
 
-![Example Device Info Screenshot](/assets/device_info_vwc.png)  
-*Example of a registered Acclima TDR-310W device showing its data in Home Assistant.*
+*Home Assistant Dashboard showing Pulse sensor data:*
+![Home Assistant Dashboard Screenshot](/assets/ha_dashboard.png)
 
-![Example Device List Screenshot](/assets/device_list.png)  
-*The device list showing THV, VWC, and Hub devices.*
+*Registered Acclima TDR-310W device showing its data in Home Assistant:*
+![Device Info Screenshot](/assets/device_info_vwc.png)
+
+*Home Assistant device list showing THV, VWC, and Hub devices:*
+![Device List Screenshot](/assets/device_list.png)
 
 ## How It Works
 
