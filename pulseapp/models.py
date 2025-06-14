@@ -1,6 +1,7 @@
+from __future__ import annotations
 from datetime import datetime
 from enum import IntEnum, Enum
-from typing import Optional, List
+from typing_extensions import override
 
 from pydantic import BaseModel, Field
 
@@ -16,8 +17,9 @@ class DeviceType(IntEnum):
     PULSE_ZERO = 5  # Possibly an older or experimental device?
     UNKNOWN = -1  # Fallback for unknown device types
 
+    @override
     @classmethod
-    def _missing_(cls, value):
+    def _missing_(cls, value: object):
         """Handles unknown values by returning the UNKNOWN enum member."""
         return cls.UNKNOWN
 
@@ -51,8 +53,9 @@ class SensorType(IntEnum):
     VWC3 = 13  # Possibly Terralink (Growlink-vendored/retrofit) - Soil Moisture Sensor
     UNKNOWN = -1  # Default fallback for unknown values
 
+    @override
     @classmethod
-    def _missing_(cls, value):
+    def _missing_(cls, value: object):
         """Handles unknown values by returning the UNKNOWN enum member."""
         return cls.UNKNOWN
 
@@ -61,43 +64,44 @@ class SensorReadingType(IntEnum):
     """Sensor reading types as defined in the Pulse API spec."""
 
     # Acclima (VWC1)
-    VWC1_RH = 0  # VWC1 - Relative Humidity Reading
-    VWC1_TEMPERATURE = 1  # VWC1 - Temperature Reading
-    VWC1_CONDUCTIVITY = 2  # VWC1 - Bulk EC Reading
-    VWC1_CONDUCTIVITY_PWE = 3  # VWC1 - Pore Water EC Reading
+    VWC1_RH = 0
+    VWC1_TEMPERATURE = 1
+    VWC1_CONDUCTIVITY = 2
+    VWC1_CONDUCTIVITY_PWE = 3
 
     # Growlink Terralink (VWC2)
-    VWC2_RH = 4  # VWC2 - Relative Humidity Reading
-    VWC2_TEMPERATURE = 5  # VWC2 - Temperature Reading
-    VWC2_CONDUCTIVITY = 6  # VWC2 - Bulk EC Reading
-    VWC2_CONDUCTIVITY_PWE = 7  # VWC2 - Pore Water EC Reading
+    VWC2_RH = 4
+    VWC2_TEMPERATURE = 5
+    VWC2_CONDUCTIVITY = 6
+    VWC2_CONDUCTIVITY_PWE = 7
 
     # TEROS 12 (VWC12)
-    VWC12_RH = 8  # VWC12 - Relative Humidity Reading
-    VWC12_TEMPERATURE = 9  # VWC12 - Temperature Reading
-    VWC12_CONDUCTIVITY = 10  # VWC12 - Bulk EC Reading
-    VWC12_CONDUCTIVITY_PWE = 11  # VWC12 - Pore Water EC Reading
+    VWC12_RH = 8
+    VWC12_TEMPERATURE = 9
+    VWC12_CONDUCTIVITY = 10
+    VWC12_CONDUCTIVITY_PWE = 11
 
     # General Readings
-    PH = 12  # pH Reading
-    WATER_TEMPERATURE = 13  # Water Temperature Reading
-    VPD = 14  # Vapor Pressure Deficit Reading
-    DEW_POINT = 15  # Dew Point Reading
-    AIR_TEMPERATURE = 16  # Air Temperature Reading
-    ORP = 17  # Oxidation-Reduction Potential (ORP) Reading
-    CO2 = 18  # Carbon Dioxide (CO₂) Reading
-    DLI = 19  # Daily Light Integral (DLI) Reading
-    PPFD = 20  # Photosynthetic Photon Flux Density (PPFD) Reading
-    EC = 21  # Electrical Conductivity (EC) Reading
+    PH = 12
+    WATER_TEMPERATURE = 13
+    VPD = 14
+    DEW_POINT = 15
+    AIR_TEMPERATURE = 16
+    ORP = 17
+    CO2 = 18
+    DLI = 19
+    PPFD = 20
+    EC = 21
     THC1_LIGHT = 22  # Light Intensity Reading from THC1
-    RH = 23  # Relative Humidity Reading
-    ORIGINAL_DEVICES_LIGHT = 24  # Light Reading from Original Devices
+    RH = 23
+    ORIGINAL_DEVICES_LIGHT = 24  # Light Reading from Pulse Pro? Not sure.
     DO = 25  # Dissolved Oxygen (DO) Reading
 
-    UNKNOWN = -1  # Default fallback for unknown values
+    UNKNOWN = -1
 
+    @override
     @classmethod
-    def _missing_(cls, value):
+    def _missing_(cls, value: object):
         """Handles unknown values by returning the UNKNOWN enum member."""
         return cls.UNKNOWN
 
@@ -159,23 +163,23 @@ class DataPointValue(BaseModel):
 class TriggeredThreshold(BaseModel):
     id: int
     createdAt: datetime
-    resolvedAt: Optional[datetime]
+    resolvedAt: datetime | None
     resolved: bool
     thresholdId: int
-    thresholdType: Optional[ThresholdType]
+    thresholdType: ThresholdType | None
     deviceId: int
     deviceName: str
     lowOrHigh: bool
     lowThresholdValue: float
     highThresholdValue: float
     triggeringValue: str
-    sensorThresholdType: Optional[SensorThresholdType]
-    hubThresholdType: Optional[HubThresholdType]
+    sensorThresholdType: SensorThresholdType | None
+    hubThresholdType: HubThresholdType | None
 
 
 class DataPointDto(BaseModel):
-    dataPointValues: List[DataPointValue]
-    triggeredThresholds: List[TriggeredThreshold] = Field(default_factory=list)
+    dataPointValues: list[DataPointValue]
+    triggeredThresholds: list[TriggeredThreshold] = Field(default_factory=list)
     sensorId: int
     createdAt: datetime
 
@@ -192,15 +196,15 @@ class HubThreshold(BaseModel):
     thresholdType: HubThresholdType
     id: int
     notificationActive: bool
-    lowThresholdValue: Optional[float]
-    highThresholdValue: Optional[float]
+    lowThresholdValue: float | None
+    highThresholdValue: float | None
     delay: str  # example: "00:03:00"
-    day: Optional[str]  # sometimes null
+    day: str | None
 
 
 class SensorDevice(BaseModel):
     hubId: int
-    parSensorSubtype: Optional[str]
+    parSensorSubtype: str | None
     deviceType: int
     sensorType: int
     id: int
@@ -213,21 +217,28 @@ class SensorDevice(BaseModel):
 class HubDetails(BaseModel):
     id: int
     name: str
-    hubThresholds: List[HubThreshold]
+    hubThresholds: list[HubThreshold]
     hidden: bool
     macAddress: str
     growId: int
-    sensorDevices: List[SensorDevice]
+    sensorDevices: list[SensorDevice]
 
 
 class DeviceClass(Enum):
+    """Enum to map Home Assistant device classes to sensor parameters.
+
+    Sensor measurement parameter names from the Pulse API like "Water Content"
+    are mapped to compatible Home Assistant device classes like "moisture",
+    by using this enum's ``from_param_name`` method.
+    """
+
     HUMIDITY = "humidity"
     TEMPERATURE = "temperature"
     MOISTURE = "moisture"
-    PRESSURE = "pressure"  # Used for VPD, for now
+    PRESSURE = "pressure"
 
     @classmethod
-    def from_param_name(cls, param_name: str) -> Optional["DeviceClass"]:
+    def from_param_name(cls, param_name: str) -> DeviceClass | None:
         mapping = {
             "Humidity": cls.HUMIDITY,
             "Temperature": cls.TEMPERATURE,
