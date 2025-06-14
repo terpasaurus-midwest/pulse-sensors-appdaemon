@@ -86,7 +86,7 @@ class PulseApp(ad.ADBase):
             state_update_interval,
         )
         self.logger.info(
-            f"⏱️ Registered sensor state update job: "
+            "⏱️ Registered sensor state update job: "
             + f"{self.state_update_job} ({state_update_interval} sec)"
         )
 
@@ -96,7 +96,7 @@ class PulseApp(ad.ADBase):
             discovery_interval,
         )
         self.logger.info(
-            f"⏱️ Registered hub sensor discovery job: "
+            "⏱️ Registered hub sensor discovery job: "
             + f"{self.discovery_job} ({discovery_interval} sec)"
         )
 
@@ -173,7 +173,7 @@ class PulseApp(ad.ADBase):
 
     def get_hub_ids(self) -> list[int] | None:
         """Fetch all hub IDs."""
-        self.logger.info(f"📡 Fetching hub IDs")
+        self.logger.info("📡 Fetching hub IDs")
         hub_ids = self._make_pulse_api_request("/hubs/ids")
         if not hub_ids or not isinstance(hub_ids, list):
             self.logger.warning("❌ No hubs returned by the Pulse API")
