@@ -1,13 +1,12 @@
 from typing import Any
 import json
-
-import requests
 import textwrap
 
 from pydantic import ValidationError
 from appdaemon import adbase as ad
 from appdaemon import AppDaemon, ADAPI
 from appdaemon.models.config.app import AppConfig
+import requests
 
 from .models import HubDetails, LatestSensorData, DeviceClass
 
