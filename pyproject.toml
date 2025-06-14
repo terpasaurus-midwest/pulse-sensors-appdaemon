@@ -1,6 +1,6 @@
 [project]
 name = "pulse-sensors-appdaemon"
-version = "0.1.0"
+version = "1.0.1"
 description = "AppDaemon script to find and expose Pulse Grow sensors to Home Assistant."
 license = {text = "Apache-2.0"}
 authors = [
