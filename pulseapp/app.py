@@ -359,6 +359,7 @@ class PulseApp(ad.ADBase):
                 "object_id": comp_unique_id,
                 "unit_of_measurement": measurement.MeasuringUnit,
                 "device_class": device_class_enum.value if device_class_enum else None,
+                "state_class": "measurement",
                 "state_topic": f"pulseapp/{device_unique_id}/state",
                 "value_template": f"{{{{ value_json.{param_name} }}}}",
             }
