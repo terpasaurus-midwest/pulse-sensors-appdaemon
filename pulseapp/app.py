@@ -119,6 +119,7 @@ class PulseApp(ad.ADBase):
         An initial discovery job will be launched 10 seconds after initialization.
         """
         self._init_required_apis()
+        self._load_discovered_hubs_from_state()
         self._register_scheduled_ad_jobs()
         self._register_update_interval_listeners()
         _ = self._adapi.run_in(self.hub_device_discovery, 10)
@@ -129,6 +130,37 @@ class PulseApp(ad.ADBase):
             self._session.close()
             self.logger.info("🛑 Closed Pulse API session.")
         self.logger.info("🛑 Pulse Sensor app terminated.")
+
+    def _load_discovered_hubs_from_state(self):
+        """Load previously discovered hubs from AppDaemon state storage."""
+        try:
+            discovered_hubs_attrs = self._adapi.get_state("discovered_hubs", attribute="all")
+            if not discovered_hubs_attrs or "attributes" not in discovered_hubs_attrs:
+                self.logger.info("📦 No previously discovered hubs found in state.")
+                return
+
+            attributes = discovered_hubs_attrs["attributes"]
+            loaded_count = 0
+
+            for hub_unique_id, hub_data in attributes.items():
+                if not isinstance(hub_data, dict):
+                    continue
+
+                try:
+                    hub = HubDetails(**hub_data)
+                    self.discovered_hubs[hub_unique_id] = hub
+                    loaded_count += 1
+                except (ValidationError, TypeError):
+                    self.logger.exception(
+                        f"⚠️ Failed to restore hub {hub_unique_id} from state"
+                    )
+
+            if loaded_count > 0:
+                self.logger.info(
+                    f"✅ Restored {loaded_count} previously discovered hubs from state."
+                )
+        except Exception:
+            self.logger.exception("❌ Error loading discovered hubs from state")
 
     def update_intervals(
         self, entity: str, attribute: str, old: Any, new: Any, **kwargs: Any
